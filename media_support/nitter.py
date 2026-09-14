@@ -47,6 +47,9 @@ class NitterService(NitterClient):
                 media_quality=str(config_get(config, "media_quality", "high") or "high")
                 .strip()
                 .lower(),
+                search_sort=str(config_get(config, "search_sort", "latest") or "latest")
+                .strip()
+                .lower(),
             ),
             log=log
             or (

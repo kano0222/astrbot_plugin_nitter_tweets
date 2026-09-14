@@ -341,9 +341,9 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 
 ### 分组类型
 
-- `group_type: blogger`：只使用 `watch_users`；走 `instances` RSS，RSS 失败或无结果时自动尝试同一列表的 HTML 用户页。
+- `group_type: blogger`：只使用 `watch_users`；走 `instances` RSS，RSS 失败或无结果时自动尝试同一列表的 HTML 用户页。**多博主分组会自动使用合并 RSS**（`/{user1,user2,...}/rss`）将多次请求压缩为按字符长度自动分批的少数几批，合并失败自动回退逐个请求。
 - `group_type: tag`：只使用 `watch_queries`，通过 `instances` 的 HTML 搜索；seen 订阅源键为 `q:<casefold query>`。
-- `group_type: list`：只使用 `watch_lists`，通过 `instances` 的 HTML 获取公开 List 时间线；seen 订阅源键为 `list:<id>`。List 不新增手动查询命令，继续使用 Dashboard 或配置管理。**创建时间较短的 List 需要过段时间才会被 Nitter 搜索到**，首轮空结果不一定是配置错误。
+- `group_type: list`：只使用 `watch_lists`，优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次返回约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）；RSS 失败或无结果时自动回退 HTML 翻页。seen 订阅源键为 `list:<id>`。List 不新增手动查询命令，继续使用 Dashboard 或配置管理。**创建时间较短的 List 需要过段时间才会被 Nitter 搜索到**，首轮空结果不一定是配置错误。
 - 创建后类型不可改（WebUI 锁定）；不要在同一分组混用 `watch_users`、`watch_queries` 与 `watch_lists`。
 - Tag/List 首轮真正没有搜索结果时不初始化 seen 或扫描水位；若有原始结果但全部被纯转推、纯文本或“仅媒体”策略过滤，则记录空扫描水位。
 - 管理命令：`/标签导入`、`/标签删除`；与 `/订阅导入`、`/订阅删除` 按类型互斥。
@@ -356,6 +356,30 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 - 若配置里已出现字面量 `[object Object]`，该项无效，请删除后重新填写 `#标签` 或短语。
 - 运行时：tag 可回退 `/hashtag/`，phrase 仅 `/search`。
 - 手动：`/推文搜索 <query> [数量]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag/List 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准。
+
+### 高级搜索语法
+
+标签分组的 `watch_queries` 和手动 `/推文搜索` 的查询字符串会原样透传给 Nitter 的 HTML 搜索（`/search?f=<sort>&q=<query>`），Nitter 再转发给推特云端。因此推特高级检索操作符**天生可用**，只要在 `watch_queries` 里填入短语类型（不带前导 `#`）即可：
+
+| 操作符 | 写法 | 效果 |
+|--------|------|------|
+| 最低点赞 | `关键词 min_faves:100` | 只返回点赞 ≥ 100 的推文 |
+| 最低转推 | `min_retweets:5` | 只返回转推 ≥ 5 的推文 |
+| 最低回复 | `min_replies:2` | 只返回回复 ≥ 2 的推文 |
+| 交集 (AND) | `#标签A #标签B`（空格分隔） | 推文必须同时包含两标签 |
+| 并集 (OR) | `#标签A OR #标签B`（大写 OR） | 满足任一标签 |
+| 排除 (NOT) | `#cosplay -#AI生成` | 含 cosplay 但不含 AI 生成 |
+| 多博主聚合 | `from:userA OR from:userB` | 一次请求聚合多位博主的新推文 |
+
+**实测黄金组合**：`白丝 min_faves:50 min_retweets:5 min_replies:2` — 推特云端直接完成阈值过滤，单次请求 1:1，零本地开销，直接全灭 0 赞 0 转的营销号水推。
+
+**多博主聚合**：将 5~10 位博主打包为一条 `from:userA OR from:userB OR ...` 查询，推特云端按时间排好序一次性返回，将 N 次网络消耗压缩为 1 次。
+
+**注意事项**：
+- 查询字符串本地截断上限为 200 字符；布尔聚合建议 5~10 人，接近上限会被截断。
+- 这些操作符只作用于 HTML 搜索路径（标签分组和手动搜索）。博主 RSS 订阅不受影响。
+- `search_sort` 设为 `top` 时，搜索改用 `f=top`（推特综合算法流/热门排序），设为 `latest`（默认）时使用 `f=tweets`（时间序）。
+- 互动质量过滤（`min_faves` 等）在推特云端完成，不消耗本地资源；`filter_plain_text_enabled` 是本地媒体过滤，两者不冲突。
 
 ### Tag/List 分组定时：获取与发送数量
 

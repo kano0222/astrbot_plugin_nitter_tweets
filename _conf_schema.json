@@ -70,6 +70,16 @@
         "default": 3.0,
         "hint": "全局 HTML 串行节流；429 冷却另计（30s 起，封顶 5 分钟）。"
       },
+      "search_sort": {
+        "description": "搜索排序方式",
+        "type": "string",
+        "default": "latest",
+        "options": [
+          "latest",
+          "top"
+        ],
+        "hint": "latest=按时间序（对应 f=tweets，默认）；top=按热门度（对应 f=top，推特综合算法流）。影响手动搜索和标签分组后台搜索；博主 RSS 订阅不受影响。"
+      },
       "html_max_pages": {
         "description": "HTML 最大翻页数",
         "type": "int",

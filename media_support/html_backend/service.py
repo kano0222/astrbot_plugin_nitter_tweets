@@ -46,6 +46,7 @@ class HtmlBackendConfig:
     retry_delay_base: float = 5.0
     retry_delay_on_cooldown: float = 10.0
     media_quality: str = "high"
+    search_sort: str = "latest"
 
 
 class HtmlNitterService:
@@ -89,6 +90,7 @@ class HtmlNitterService:
                 retry_delay_base=self.config.retry_delay_base,
                 retry_delay_on_cooldown=self.config.retry_delay_on_cooldown,
                 media_quality=self.config.media_quality,
+                search_sort=self.config.search_sort,
             ),
             log=self.log,
             shared_limiter=self.limiter,

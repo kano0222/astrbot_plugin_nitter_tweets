@@ -46,6 +46,7 @@ class PoolConfig:
     retry_delay_base: float = 5.0  # Base delay between global retries (seconds)
     retry_delay_on_cooldown: float = 10.0  # Delay when all instances cooling
     media_quality: str = "high"  # pbs.twimg image quality tier (high/medium/low)
+    search_sort: str = "latest"  # Nitter search f= param: latest=tweets, top=top
 
 
 class HtmlFetchError(RuntimeError):
@@ -850,7 +851,10 @@ class HtmlNitterPool:
         pages = self.config.max_pages if max_pages is None else max_pages
         page_count = self._page_count(pages)
         for page_i in range(page_count):
-            params = {"f": "tweets", "q": query}
+            params = {
+                "f": "top" if self.config.search_sort == "top" else "tweets",
+                "q": query,
+            }
             if cursor:
                 params["cursor"] = cursor
             path = "/search?" + urlencode(params)
