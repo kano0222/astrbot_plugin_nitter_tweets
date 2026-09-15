@@ -57,11 +57,11 @@ AstrBot 插件 `astrbot_plugin_nitter_tweets`：Nitter RSS / HTML 搜索获取�
 - `group_type`：`blogger` | `tag` | **`list`**。创建后勿改；字段分别用 `watch_users` / `watch_queries` / **`watch_lists`**，勿混用。
 - seen：`group_id + account_key`；博主=用户名；标签=`q:<casefold>`；List=`list:<id>`（用 `normalize_seen_account_key`）。
 - 转发过滤：`全局 filter_reposts_enabled && 分组 filter_reposts_enabled`；手动命令不读分组子开关。
-- List 必须 Public；ID 为纯数字；走统一 `instances` HTML。
+- List 必须 Public；ID 为纯数字；走统一 `instances`（RSS 优先，失败回退 HTML）。
 
 ### 自建实例
 
-- `instances`：唯一 Nitter 列表，同时用于博主 RSS/HTML、搜索、List 和后台并发抓取。
+- `instances`：唯一 Nitter 列表，同时用于博主 RSS、List RSS、搜索/HTML 后备和后台并发抓取。
 - Blogger 固定 RSS 优先、HTML 自动后备；无 `user_html_fallback` 开关。
 - `search_instances` / `blogger_html_instances` / `concurrent_fetch_instances` 已删除，只做启动诊断，不读取、不迁移、不写回。
 - 无公共默认实例；已退役公共地址只在运行时过滤并记录 warning。
@@ -82,6 +82,8 @@ AstrBot 插件 `astrbot_plugin_nitter_tweets`：Nitter RSS / HTML 搜索获取�
 ## RSS / HTML / 过滤（摘要）
 
 - 手动 `fetch_tweets` 默认不跳纯文本、保留转发；后台可用 `skip_plain_text` 与双层转发过滤。
+- 博主分组后台检查默认走合并 RSS 管道（`/{u1,u2,...}/rss`），按 URL 250 字符安全分批并以批次最旧水位为扫描边界；合并失败或用户想保留转推（`filter_reposts_enabled=false`）时自动回退/走逐个请求。
+- `filter_plain_text_enabled` 云端优化：Tag 搜索追加 `filter:media`；博主仅在转发过滤也开启时切 `/{user}/media/rss` 相册专线，否则保持主页 RSS 由本地过滤以保留转推；List 保持本地过滤。
 - 纯文本过滤只影响后台：作者上传媒体才算；`card_img`、Article 封面、**引用推媒体**不算。
 - 整页被滤但仍有 cursor 须翻页；真·空 feed 才 empty。
 - 诊断：`python scripts/probe_nitter_fetch.py nasa 5 --instance http://nitter:8080`（可加 `--skip-plain-text` / `--include-reposts`）。
@@ -119,8 +121,9 @@ ruff format --check .
 
 - Ruff：**0.15.22**；与 `.pre-commit-config.yaml` 保持一致。
 - 链接解析：`tests/test_status_link_preview.py`
-- List：`tests/test_list_support.py`、`tests/test_scheduler_list_delivery.py`
-- 标签调度：`tests/test_scheduler_tag_delivery.py`
+- 合并 RSS 管道：`tests/test_merged_rss.py`
+- List：`tests/test_list_rss.py`、`tests/test_list_support.py`、`tests/test_scheduler_list_delivery.py`
+- 标签调度与搜索排序：`tests/test_scheduler_tag_delivery.py`、`tests/test_search_sort.py`
 - HTML/搜索：`tests/test_html_backend_query.py`、`tests/test_watch_queries_config.py`
 - 日志与 HTML 页面分类：`tests/test_observability.py`、`tests/test_html_gate_detection.py`
 - 版式与订阅显示：`tests/test_tweet_layout.py`、`tests/test_subscription_display.py`

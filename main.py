@@ -60,7 +60,7 @@ except ImportError:
     "astrbot_plugin_nitter_tweets",
     "shitianyaa",
     "Fetch recent public tweets from Nitter and send them as chat records.",
-    "1.4.0",
+    "1.5.0",
     "https://github.com/shitianyaa/astrbot_plugin_nitter_tweets",
 )
 class NitterTweetsPlugin(
@@ -211,8 +211,13 @@ class NitterTweetsPlugin(
 
     @filter.command("推文搜索", alias={"tweetsearch"})
     async def cmd_tweet_search(self, event: AstrMessageEvent, args=GreedyStr):
-        """搜索公开推文。标签请带 #，短语直接写。用法：/推文搜索 <query> [数量]"""
+        """搜索公开推文。标签请带 #，短语直接写。用法：/推文搜索 <query> [数量] [热门]"""
         return await self._cmd_tweet_search_impl(event, args)
+
+    @filter.command("推文搜图", alias={"tweetpic", "搜推图"})
+    async def cmd_tweet_search_media(self, event: AstrMessageEvent, args=GreedyStr):
+        """只搜带图片/视频的推文。用法：/推文搜图 <query> [数量] [热门]"""
+        return await self._cmd_tweet_search_impl(event, args, is_media_search=True)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("镜像测试")

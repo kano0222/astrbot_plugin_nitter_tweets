@@ -473,7 +473,7 @@ def test_list_empty_host_rotates_to_later_hit():
     assert base == "https://b.example"
     assert [tweet.status_id for tweet in tweets] == ["42"]
     assert tried == ["https://a.example", "https://b.example"]
-    assert tweets.host_attempts == ["a.example=空结果", "b.example=成功"]
+    assert tweets.host_attempts == ["#1=空结果", "#2=成功"]
 
 
 def test_list_pool_inherits_global_repost_filter():

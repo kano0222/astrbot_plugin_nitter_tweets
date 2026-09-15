@@ -45,13 +45,13 @@ NitterTweetScheduler
 
 ## RSS 链路
 
-1. 手动和后台都通过 `NitterService`；内部 RSS parser 处理用户 feed，HTML parser 处理用户后备、搜索和 List。
-2. Blogger 按 `instances` 顺序请求 `/<username>/rss`；Tag/List 使用同一列表串行请求搜索或 List 页面。
+1. 手动和后台都通过 `NitterService`；内部 RSS parser 处理用户 feed 和 List RSS，HTML parser 处理用户后备、搜索和 List 回退。
+2. Blogger 按 `instances` 顺序请求 `/<username>/rss`（多博主分组自动合并为 `/{user1,user2,...}/rss`）；Tag 使用同一列表串行请求 HTML 搜索；List 优先请求 `/i/lists/<id>/rss`，失败回退 HTML 翻页。
 3. 处理 HTTP/SSL/timeout、限流和普通错误页
 4. 解析 RSS item 或 HTML item
 5. 过滤转发（Blogger、Tag、List 均按“全局总开关 && 分组子开关”的有效值处理）
 6. 可选过滤纯文本
-7. 手动路径按请求数量停止；后台 Blogger 扫描首屏约 20 条并按 `Min-Id` 分页；Tag 最多保留 20 条候选；List 首轮最多 20 条，后续本轮扫描可超过 20 条并按旧水位分页到边界或游标结束
+7. 手动路径按请求数量停止；后台 Blogger 扫描首屏约 20 条并按 `Min-Id` 分页；Tag 最多保留 20 条候选；List RSS 首次约 100 条并按 `Min-Id` 分页到旧水位（同 Blogger），RSS 失败回退时同 Tag 的 HTML 分页
 
 纯文本过滤只认当前作者区域的 `/pic/media`、`<video>` 和 Nitter 视频缩略图。引用推文和 `card_img` 不算当前作者媒体。
 
@@ -63,7 +63,7 @@ HTML 只分类真实时间线、空页、登录/维护/错误页和异常页面�
 2. 调度存储初始化由后台循环和手动/Plugin Pages 检查共享同一异步锁；迁移未完成时不会进入抓取或发送。
 3. `run_check()` 加锁，避免并发检查；启动首检、手动检查和 WebUI 检查会等待已有检查完成，普通定时触发则返回已在运行。
 4. 读取该分组 seen map 和独立扫描基准组。
-5. Blogger 按 RSS 首屏与基准分页；Tag/List 都把旧扫描水位传给 HTML 分页器，在 `html_max_pages` 范围内寻找基准。扫描未完整且当前第一页有有效状态 ID 时，按 `max_tweets_per_check` 处理：上限为 0 时不推送并自动重建第一页基准，上限大于 0 时最多推送该数量，所有目标处理完后自动重建第一页基准；准备失败、基准无效或基准写入失败时保留旧水位，发送调用失败则按本轮跳过处理。Tag 使用 `q:`、List 使用 `list:` seen 键。
+5. Blogger 按 RSS 首屏与基准分页；Tag 把旧扫描水位传给 HTML 分页器，在 `html_max_pages` 范围内寻找基准；List 优先走 RSS `Min-Id` 分页（同 Blogger 逻辑），RSS 失败时回退 HTML 分页器。扫描未完整且当前第一页有有效状态 ID 时，按 `max_tweets_per_check` 处理：上限为 0 时不推送并自动重建第一页基准，上限大于 0 时最多推送该数量，所有目标处理完后自动重建第一页基准；准备失败、基准无效或基准写入失败时保留旧水位，发送调用失败则按本轮跳过处理。Tag 使用 `q:`、List 使用 `list:` seen 键。
 6. 首次订阅源初始化 seen 和最近最多 20 个扫描基准 ID，不推送历史；Tag/List 真正空首轮保持未初始化，有原始结果但全被过滤时记录空扫描水位。
 7. 非首次订阅源按命中的基准 ID 确定时间边界，再用 seen 排除已处理的推文。
 8. 按推文 ID 与 seen 做差集，所有新推文都在本轮准备；发送阶段再按每个目标 UMO 的共享作者黑名单生成允许子集。

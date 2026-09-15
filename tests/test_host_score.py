@@ -198,7 +198,7 @@ def test_search_empty_soft_success_and_nonempty_full():
     pool.limiter = MagicMock()
     pool.limiter.is_cooling = MagicMock(return_value=False)
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         if "a.example" in base:
             return []
         return [

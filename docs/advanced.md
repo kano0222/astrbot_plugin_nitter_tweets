@@ -175,7 +175,7 @@ AstrBot 设置界面已按“基础、媒体、AI 翻译、后台检查、推送
 | `send_user_interval` | 该分组多个订阅源之间的发送间隔（秒）；不设置则使用全局 `send_user_interval` 值。Tag/List 查询抓取之间也按该间隔等待。 |
 | `max_tweets_per_check` | 单个订阅源单次检查最多推送的推文条数；`0`（默认）表示不限制，范围 0-200。适用于爆发式更新场景，避免一次推送过多消息。被截断的较旧推文会标记 seen，不会在下轮重新推送；Tag/List 扫描未完整且找不到旧基准时，`0` 会跳过推送并自动重建第一页基准，正数会按上限推送后再重建基准，旧积压可能被跳过。 |
 | `filter_reposts_enabled` | 分组级转发过滤子开关，默认开启；仅在全局同名总开关开启时生效。旧分组缺少该字段时按开启处理。 |
-| `filter_plain_text_enabled` | 是否过滤没有当前作者上传图片、视频或 GIF 的纯文本推文；只影响该分组的后台检查，手动 `/推文`、`/镜像测试` 不受影响。 |
+| `filter_plain_text_enabled` | 是否过滤没有当前作者上传图片、视频或 GIF 的纯文本推文；只影响该分组的后台检查，手动 `/推文`、`/镜像测试` 不受影响。开启后底层自动走云端优化：tag 分组搜索追加 `filter:media`（推特云端过滤），blogger 分组在转发过滤也开启时 RSS 切换为 `/{user}/media/rss` 相册专线（含合并流 `/{user1,user2}/media/rss`），转发过滤关闭时保持主页 RSS 由本地过滤以保留转推；list 分组维持本地过滤（无相册端点）。 |
 | `media_only_enabled` | 是否只发送作者和成功准备的图片/视频/GIF；受全局媒体类型开关和 `max_media_per_tweet` 控制。全局媒体不可用时只在 WebUI 和日志提示，并自动回退完整内容。仅媒体有效时：`policy_skipped` 允许扫描基准推进，`transient_failure` / `no_candidate` 下轮重试且不写 seen；手动命令和历史重推不受影响。 |
 
 
@@ -272,10 +272,10 @@ HTML 简略规则（`[NitterTweets][html]`，由 `QuietHtmlLog` 实现）：
 - 强制准备图片/视频（无视全局图视频开关与 `max_media_per_tweet`），仍受大小、时长、超时限制。
 - 翻译走现有 `TweetTranslator`；原文显隐仅看全局 `show_original_when_translated`（与手动一致，无分组覆盖）。
 - 发送版式复用现有 Sender；正文布局 R1（译文为主文，原文 `>` 引用；无「翻译/原文」小标题）；默认 `omit_status_url=true`。
-- 展示时间统一为 **Asia/Shanghai（UTC+8）** `YYYY-MM-DD HH:MM:SS`（RSS、链接解析、HTML 搜索/List、渲染兜底）。
+- 展示时间统一为 **Asia/Shanghai（UTC+8）** `YYYY-MM-DD HH:MM:SS`（RSS、链接解析、HTML 搜索、List RSS、渲染兜底）。
 - 同会话同 status 约 60 秒防抖（成功发送后记录）；单条消息最多 3 个不同链接。
 
-- 首次启用某个订阅源时，会初始化当前扫描到的 seen ID 和独立扫描基准组，不推送历史内容；Tag/List 首轮边界见“Tag/List 分组与 HTML 搜索”。
+- 首次启用某个订阅源时，会初始化当前扫描到的 seen ID 和独立扫描基准组，不推送历史内容；Tag/List 首轮边界见「Tag 搜索与 List 分组调度」。
 - `check_on_startup=true` 时，存储迁移完成后会先按分组串行执行一次首检，再进入间隔/每日槽位轮询；首检日志始终包含分组、类型、订阅源数、目标数、触发原因、结果统计和耗时。缺少订阅源或目标的启用分组只记录明确跳过原因。
 - 后台检查保存上一轮首屏最多 20 个精确基准 ID，并用最近 300 条 seen ID 做逐条去重。当前首屏未命中基准组中的任意 ID 时才按 `Min-Id` 继续翻页；命中基准前所有未 seen 推文都在本轮发送，命中位置及其后的旧内容不参与比较。Tag/List 在页数用尽仍未命中旧基准时，按 `max_tweets_per_check` 处理并在安全条件满足后自动用当前第一页基准重建；发送准备失败、基准无效或基准写入失败时保留旧水位，发送调用失败则按本轮跳过并推进 seen。
 - 旧版顶层 `watch_users`、`push_targets` 和分组相关定时配置会自动迁移到 `default` 默认分组；`tweet_groups` 中的各推送分组会独立运行，并拥有独立的推送记录。
@@ -337,15 +337,15 @@ python scripts\probe_nitter_fetch.py nasa 5 --instance http://nitter:8080 --incl
 python scripts\test_video_download.py https://x.com/user/status/123 --resolution highest --max-duration-minutes 8
 ```
 
-## Tag/List 分组与 HTML 搜索
+## Tag 搜索与 List 分组调度
 
 ### 分组类型
 
-- `group_type: blogger`：只使用 `watch_users`；走 `instances` RSS，RSS 失败或无结果时自动尝试同一列表的 HTML 用户页。
+- `group_type: blogger`：只使用 `watch_users`；走 `instances` RSS，RSS 失败或无结果时自动尝试同一列表的 HTML 用户页。**多博主分组在转发过滤开启时会自动使用合并 RSS**（`/{user1,user2,...}/rss`）将多次请求压缩为按字符长度自动分批的少数几批，合并流以批次中水位最低（最旧）的博主为扫描边界，确保所有博主的新推文都被完整捕获；合并失败自动回退逐个请求。转发过滤关闭时跳过合并流改走逐个请求——合并流按作者拆分会丢弃批次外作者的转推，不支持保留转推。
 - `group_type: tag`：只使用 `watch_queries`，通过 `instances` 的 HTML 搜索；seen 订阅源键为 `q:<casefold query>`。
-- `group_type: list`：只使用 `watch_lists`，通过 `instances` 的 HTML 获取公开 List 时间线；seen 订阅源键为 `list:<id>`。List 不新增手动查询命令，继续使用 Dashboard 或配置管理。**创建时间较短的 List 需要过段时间才会被 Nitter 搜索到**，首轮空结果不一定是配置错误。
+- `group_type: list`：只使用 `watch_lists`，优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次返回约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）；RSS 发生网络/HTTP 异常或扫描未完成时自动回退 HTML 翻页；扫描完成无新推文时不触发回退。seen 订阅源键为 `list:<id>`。List 不新增手动查询命令，继续使用 Dashboard 或配置管理。**创建时间较短的 List 需要过段时间才会被 Nitter 搜索到**，首轮空结果不一定是配置错误。
 - 创建后类型不可改（WebUI 锁定）；不要在同一分组混用 `watch_users`、`watch_queries` 与 `watch_lists`。
-- Tag/List 首轮真正没有搜索结果时不初始化 seen 或扫描水位；若有原始结果但全部被纯转推、纯文本或“仅媒体”策略过滤，则记录空扫描水位。
+- Tag/List 首轮真正没有可用结果时不初始化 seen 或扫描水位；若有原始结果但全部被纯转推、纯文本或「仅媒体」策略过滤，则记录空扫描水位。
 - 管理命令：`/标签导入`、`/标签删除`；与 `/订阅导入`、`/订阅删除` 按类型互斥。
 
 ### 查询规则（配置怎么写）
@@ -355,15 +355,40 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 - 兼容读取旧的 `{query, type}` 对象，启动/保存时会规范成字符串，避免 AstrBot 配置列表显示成 `[object Object]`。
 - 若配置里已出现字面量 `[object Object]`，该项无效，请删除后重新填写 `#标签` 或短语。
 - 运行时：tag 可回退 `/hashtag/`，phrase 仅 `/search`。
-- 手动：`/推文搜索 <query> [数量]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag/List 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准。
+- 手动：`/推文搜索 <query> [数量] [热门]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准；List RSS 按 `Min-Id` 分页到旧水位（同 Blogger），RSS 失败回退时同 Tag。加「热门」或「top」按热度排序（`f=top`），否则按全局 `search_sort` 配置。`/推文搜图` 用法相同，但自动追加 `filter:media` 只返回带图片/视频的推文，正文照常显示。支持 CLI 风格 flag：`-<数量>`（如 `-3`，等价 `-n 3`）、`-n <数量>`、`--limit <数量>`、`-top`/`--top`/`-热门`/`--热门`（热门排序）、`-last`/`--last`/`-最新`/`--最新`（强制时间序，覆盖全局 `search_sort=top`）（均大小写不敏感）。多个排序 flag 并存时最后一个生效。检测到已知 flag 时精准提取，剩余文本原样作为查询词——不再猜测词尾的「热门」或数字，因此 `deepseek娘 -3 -top` 的查询词是 `deepseek娘`。推特排除语法（如 `python -java`）不受影响——`-java` 不在白名单内，完整保留在查询词中。无 flag 时走兼容逻辑（`纳西妲 5 热门` 等老写法不变）。
+
+### 高级搜索语法
+
+标签分组的 `watch_queries` 和手动 `/推文搜索` 的查询字符串会原样透传给 Nitter 的 HTML 搜索（`/search?f=<sort>&q=<query>`），Nitter 再转发给推特云端。因此推特高级检索操作符**天生可用**，只要在 `watch_queries` 里填入短语类型（不带前导 `#`）即可：
+
+| 操作符 | 写法 | 效果 |
+|--------|------|------|
+| 最低点赞 | `关键词 min_faves:100` | 只返回点赞 ≥ 100 的推文 |
+| 最低转推 | `min_retweets:5` | 只返回转推 ≥ 5 的推文 |
+| 最低回复 | `min_replies:2` | 只返回回复 ≥ 2 的推文 |
+| 交集 (AND) | `#标签A #标签B`（空格分隔） | 推文必须同时包含两标签 |
+| 并集 (OR) | `#标签A OR #标签B`（大写 OR） | 满足任一标签 |
+| 排除 (NOT) | `#cosplay -#AI生成` | 含 cosplay 但不含 AI 生成 |
+| 多博主聚合 | `from:userA OR from:userB` | 一次请求聚合多位博主的新推文 |
+
+**实测黄金组合**：`白丝 min_faves:50 min_retweets:5 min_replies:2` — 推特云端直接完成阈值过滤，单次请求 1:1，零本地开销，直接全灭 0 赞 0 转的营销号水推。
+
+**多博主聚合**：将 5~10 位博主打包为一条 `from:userA OR from:userB OR ...` 查询，推特云端按时间排好序一次性返回，将 N 次网络消耗压缩为 1 次。
+
+**注意事项**：
+- 查询字符串本地截断上限为 200 字符；布尔聚合建议 5~10 人，接近上限会被截断。
+- 这些操作符只作用于 HTML 搜索路径（标签分组和手动搜索）。博主 RSS 订阅不受影响。
+- `search_sort` 设为 `top` 时，搜索改用 `f=top`（推特综合算法流/热门排序），设为 `latest`（默认）时使用 `f=tweets`（时间序）。
+- 互动质量过滤（`min_faves` 等）在推特云端完成，不消耗本地资源；`filter_plain_text_enabled` 开启后也走云端优化（tag 追加 `filter:media`、blogger 在转发过滤也开启时切 `/media/rss`），两者不冲突。
 
 ### Tag/List 分组定时：获取与发送数量
 
 ```text
 每个 watch_query 或 watch_list / 每轮检查
-  → HTML 搜索（组内串行，订阅源间按 send_user_interval 等待；默认 html_max_pages=1）
-  → 首轮/无旧基准：最多取首屏 20 条建立基准；已有 Tag/List 水位时本轮扫描可超过 20 条
-  → 在 html_max_pages 内寻找旧水位，命中则正常推送；到达页数仍未命中则视为扫描未完整
+  → Tag: HTML 搜索（组内串行，订阅源间按 send_user_interval 等待；默认 html_max_pages=1）
+  → List: RSS 优先 /i/lists/<id>/rss（单次约 100 条，按 Min-Id 分页同 Blogger）；失败回退 Tag 路径
+  → 首轮/无旧基准：Tag 最多取首屏 20 条；List RSS 首次约 100 条建立基准；已有水位时本轮扫描可超过首屏
+  → Tag 在 html_max_pages 内寻找旧水位；List RSS 按 Min-Id 分页到旧水位（HTML 回退同 Tag）；命中则正常推送，未命中则视为扫描未完整
   → max_tweets_per_check=0：不推送，使用当前第一页最多 20 个有效状态 ID 自动重建基准
   → max_tweets_per_check>0：最多推送 N 条，所有目标处理完后使用当前第一页最多 20 个有效状态 ID 自动重建基准
   → 首屏无有效 ID、发送准备失败或基准写入失败：保留旧水位，允许下轮重试；发送调用失败则跳过当前批次，不在下轮自动重试
@@ -375,7 +400,7 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
   → 发送成功或发送调用失败后目标均视为已处理并写入 seen；媒体准备失败仍不写 seen，下轮重试
 ```
 
-因此 Tag/List「拉到 20 但只推几条」通常是正常的：多数已 seen，或被 RT/纯文本滤掉。已有水位时一轮内可能扫描并发现超过 20 条新推文，但首次基准和每轮持久化水位仍最多保存 20 个 ID；`max_tweets_per_check` 可限制实际发送量。若页数用尽仍找不到旧基准，日志会明确提示扫描未完整和自动重建基准，旧积压可能被跳过。
+因此 Tag/List「拉到 20（List RSS 约 100）但只推几条」通常是正常的：多数已 seen，或被 RT/纯文本滤掉。已有水位时一轮内可能扫描并发现超过首屏数量的新推文，但首次基准和每轮持久化水位仍最多保存 20 个 ID；`max_tweets_per_check` 可限制实际发送量。若页数用尽仍找不到旧基准，日志会明确提示扫描未完整和自动重建基准，旧积压可能被跳过。
 HTTP 层会识别错误页、限流和异常 HTML 响应。自建实例的访问控制应在 Nitter 或反向代理层配置。**默认 `brief_log_enabled=true` 时**不会刷 `session load` / 每次 `try`；主要看 fail、ok after rotate 与结构化检查摘要。关闭简略后才有完整过程日志（`session load` 仍始终抑制）。
 
 **空结果与全量过滤：** Tag/List 都走 `instances`；多站时会轮换。实例 HTTP 成功但本页没有可用推文时返回空列表，**不当作抓取失败**。调度器会区分两种首轮结果：真正没有原始结果时不写 seen 或扫描水位，下一次非空结果仍只用于初始化，不推历史；有原始结果但全部被纯转推、纯文本或“仅媒体”策略过滤时写入空扫描水位，下一轮符合条件的新帖会作为新内容推送。只有全部实例请求异常时才记抓取失败。
@@ -384,13 +409,13 @@ HTTP 层会识别错误页、限流和异常 HTML 响应。自建实例的访问
 
 | 列表 | 用途 |
 |------|------|
-| `instances` | 自建 Nitter；同时用于博主 RSS、Tag/List 和手动搜索 HTML |
+| `instances` | 自建 Nitter；同时用于博主 RSS（含合并流）、List RSS、Tag 搜索和手动搜索 HTML |
 
 旧 `search_instances`、`blogger_html_instances` 和 `concurrent_fetch_instances` 不再参与运行；启动日志只提示被忽略的 origin。新配置只填 `instances`。
 
-HTML 全局串行节流；Tag/List 查询在组内也会按 `send_user_interval` 串行等待。429 冷却约 30s 起、封顶 5 分钟。Cookie 落在插件数据目录 `html_sessions/`。
+Tag 搜索和 List HTML 回退受 HTML 全局串行节流约束；Tag/List 订阅源在组内也会按 `send_user_interval` 串行等待。429 冷却约 30s 起、封顶 5 分钟。Cookie 落在插件数据目录 `html_sessions/`。
 
-搜索/List 实例池有多站时失败会轮换（冷却殿后）。**可用性优先：** 进程内按请求成功率记分，ready 高分优先。
+Tag 搜索和 List 请求在有多站时失败会轮换（冷却殿后）。**可用性优先：** 进程内按请求成功率记分，ready 高分优先。
 
 记分规则（内存，重启清零；统一实例分数由 RSS 与 HTML 共享）：
 
@@ -401,7 +426,7 @@ HTML 全局串行节流；Tag/List 查询在组内也会按 `send_user_interval`
 
 ## RSS 重试与本轮跳过（第二刀）
 
-- `retry_attempts` / `retry_delay_seconds`：全局 basic 配置，默认 2 / 5s。同时用于 HTML 搜索/List 的全局重试：所有实例失败后按此延迟重试，全部实例冷却时延迟为该值的两倍。
+- `retry_attempts` / `retry_delay_seconds`：全局 basic 配置，默认 2 / 5s。同时用于 HTML 搜索和 List RSS 的全局重试：所有实例失败后按此延迟重试，全部实例冷却时延迟为该值的两倍。
 - 一次定时检查或一次手动 `/推文` 期间，若某 RSS 镜像出现 429/可重试失败，本轮后续账号跳过该 host；检查结束即丢弃（不写盘、不跨 tick）。
 - HTML 搜索使用统一服务内的 host 冷却（30s 起、封顶 5min），并已加线程锁。
 

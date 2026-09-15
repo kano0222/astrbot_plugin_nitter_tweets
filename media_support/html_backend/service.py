@@ -46,6 +46,7 @@ class HtmlBackendConfig:
     retry_delay_base: float = 5.0
     retry_delay_on_cooldown: float = 10.0
     media_quality: str = "high"
+    search_sort: str = "latest"
 
 
 class HtmlNitterService:
@@ -89,6 +90,7 @@ class HtmlNitterService:
                 retry_delay_base=self.config.retry_delay_base,
                 retry_delay_on_cooldown=self.config.retry_delay_on_cooldown,
                 media_quality=self.config.media_quality,
+                search_sort=self.config.search_sort,
             ),
             log=self.log,
             shared_limiter=self.limiter,
@@ -123,6 +125,7 @@ class HtmlNitterService:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[str, HtmlSearchResult]:
         q = normalize_query(query)
         resolved = kind or query_kind(q)
@@ -134,6 +137,7 @@ class HtmlNitterService:
             max_pages=max_pages,
             filter_reposts=filter_reposts,
             anchor_ids=anchor_ids,
+            sort=sort,
         )
 
     def fetch_list(

@@ -26,7 +26,7 @@
         "description": "Nitter 请求重试轮数",
         "type": "int",
         "default": 2,
-        "hint": "轮换重试轮数，默认 2。插件会轮流尝试所有实例，重复指定轮数。例如 3 个实例、2 轮：A→B→C→A→B→C。同时用于 HTML 搜索/List 的全局重试。"
+        "hint": "轮换重试轮数，默认 2。插件会轮流尝试所有实例，重复指定轮数。例如 3 个实例、2 轮：A→B→C→A→B→C。同时用于 HTML 搜索和 List RSS 的全局重试。"
       },
       "retry_delay_seconds": {
         "description": "Nitter 请求重试间隔（秒）",
@@ -70,11 +70,21 @@
         "default": 3.0,
         "hint": "全局 HTML 串行节流；429 冷却另计（30s 起，封顶 5 分钟）。"
       },
+      "search_sort": {
+        "description": "搜索排序方式",
+        "type": "string",
+        "default": "latest",
+        "options": [
+          "latest",
+          "top"
+        ],
+        "hint": "latest=按时间序（对应 f=tweets，默认）；top=按热门度（对应 f=top，推特综合算法流）。主要影响手动 /推文搜索 与 /推文搜图；后台 Tag 增量扫描强制保持最新时间序，博主与 List RSS 不受影响。手动搜索可用「-top」按热门排序，或「-last」强制时间序（覆盖全局 top 设置）。"
+      },
       "html_max_pages": {
         "description": "HTML 最大翻页数",
         "type": "int",
         "default": 1,
-        "hint": "手动搜索按请求上限截断；Tag/List 首轮最多取 20 条建立基准，已有水位后最多翻到该页数以寻找旧水位或游标末尾。Tag/List 达到上限仍未命中旧基准时，max_tweets_per_check=0 会跳过推送并用当前第一页最多 20 个状态 ID 自动重建基准，正数按上限推送成功后再重建；若第一页没有有效状态 ID、发送失败或基准写入失败，则保留旧水位。持久化水位始终最多保存 20 个 ID。"
+        "hint": "手动搜索按请求上限截断；Tag 搜索和 List HTML 回退首轮最多取 20 条建立基准，已有水位后最多翻到该页数以寻找旧水位或游标末尾。List RSS 不受此限制（按 Min-Id 分页，同 Blogger）。Tag/List 达到上限仍未命中旧基准时，max_tweets_per_check=0 会跳过推送并用当前第一页最多 20 个状态 ID 自动重建基准，正数按上限推送成功后再重建；若第一页没有有效状态 ID、发送失败或基准写入失败，则保留旧水位。持久化水位始终最多保存 20 个 ID。"
       }
     }
   },
@@ -324,7 +334,7 @@
                 "description": "过滤纯文本推文",
                 "type": "bool",
                 "default": false,
-                "hint": "开启后，该分组的后台检查会跳过没有任何作者上传媒体附件（图片/视频/GIF）的推文；按当前订阅源的 RSS 或 HTML 解析结果判断，不依赖媒体下载，链接预览卡片图和 Twitter Article（长文）封面图不算作者上传媒体。手动命令不受影响。"
+                "hint": "开启后，该分组的后台检查会跳过没有任何作者上传媒体附件（图片/视频/GIF）的推文。当转发过滤也开启时，RSS 自动切换为 /{user}/media/rss 相册专线（含合并流），服务端只返回作者本人上传的媒体推文；若转发过滤关闭则保持主页 RSS 由本地过滤，避免相册端点吞掉用户想保留的转推。按 RSS 解析结果判断，不依赖媒体下载，链接预览卡片图和 Twitter Article（长文）封面图不算作者上传媒体。手动命令不受影响。"
               },
               "media_only_enabled": {
                 "description": "仅媒体",
@@ -461,7 +471,7 @@
                 "description": "过滤纯文本推文",
                 "type": "bool",
                 "default": false,
-                "hint": "开启后，该分组的后台检查会跳过没有任何作者上传媒体附件（图片/视频/GIF）的推文；按 HTML 搜索解析结果判断，不依赖媒体下载，链接预览卡片图和 Twitter Article（长文）封面图不算作者上传媒体。手动命令不受影响。"
+                "hint": "开启后，该分组的后台检查会跳过没有任何作者上传媒体附件（图片/视频/GIF）的推文。底层自动追加 filter:media 走推特云端过滤，按 HTML 搜索解析结果判断，不依赖媒体下载，链接预览卡片图和 Twitter Article（长文）封面图不算作者上传媒体。手动命令不受影响。"
               },
               "media_only_enabled": {
                 "description": "仅媒体",
@@ -597,7 +607,7 @@
                 "description": "过滤纯文本推文",
                 "type": "bool",
                 "default": false,
-                "hint": "开启后，该分组的后台检查会跳过没有任何作者上传媒体附件（图片/视频/GIF）的推文；按 List HTML 时间线解析结果判断，不依赖媒体下载。手动命令不受影响。"
+                "hint": "开启后，该分组的后台检查会跳过没有任何作者上传媒体附件（图片/视频/GIF）的推文。List 无相册端点，维持本地过滤；按 List RSS 时间线解析结果判断，不依赖媒体下载。手动命令不受影响。"
               },
               "media_only_enabled": {
                 "description": "仅媒体",

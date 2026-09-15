@@ -4,7 +4,6 @@ import asyncio
 import copy
 import datetime as dt
 import time
-from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from astrbot.api import logger
@@ -71,14 +70,6 @@ except ImportError:
     from shared import format_subscription_source
     from shared.group_ids import GLOBAL_GROUP_ID
     from storage import StorageAdapter
-
-
-def _instance_host(instance: str) -> str:
-    value = str(instance or "").strip()
-    if not value:
-        return ""
-    parsed = urlparse(value if "://" in value else f"//{value}")
-    return (parsed.hostname or parsed.path or value).rstrip(".")
 
 
 try:
@@ -811,9 +802,7 @@ class NitterTweetScheduler(
                 if fetch_result.host_attempts:
                     result.source_attempts[username] = list(fetch_result.host_attempts)
                 elif fetch_result.instance:
-                    instance_host = _instance_host(fetch_result.instance)
-                    if instance_host:
-                        result.source_attempts[username] = [f"{instance_host}=成功"]
+                    result.source_attempts[username] = ["成功"]
                 if fetch_result.error:
                     result.source_statuses[username] = SourceStatus.FAILED
                     result.failed_users[username] = fetch_result.error.message

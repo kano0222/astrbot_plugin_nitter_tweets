@@ -455,6 +455,8 @@ class NitterClient:
         anchor_ids: list[str] | None,
         skip_plain_text: bool = False,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> tuple[str, SchedulerFetchResult]:
         return await self._fetch_tweets_for_scheduler_from_instances(
             username,
@@ -463,6 +465,7 @@ class NitterClient:
             skip_plain_text=skip_plain_text,
             retry_attempts=self.retry_attempts,
             filter_reposts=filter_reposts,
+            path_override=path_override,
         )
 
     async def fetch_tweets_for_scheduler_from_instances(
@@ -474,6 +477,8 @@ class NitterClient:
         skip_plain_text: bool = False,
         retry_attempts: int = 3,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> tuple[str, SchedulerFetchResult]:
         """Fetch a complete scheduler scan from an instance pool.
 
@@ -494,6 +499,32 @@ class NitterClient:
             retry_attempts=retry_attempts,
             total_retry_attempts_per_instance=False,
             filter_reposts=filter_reposts,
+            path_override=path_override,
+        )
+
+    async def fetch_list_for_scheduler(
+        self,
+        list_id: str,
+        anchor_ids: list[str] | None,
+        skip_plain_text: bool = False,
+        filter_reposts: bool | None = None,
+    ) -> tuple[str, SchedulerFetchResult]:
+        """Fetch a Twitter List timeline via RSS (``/i/lists/<id>/rss``).
+
+        Reuses the same scan loop as blogger RSS. The list path is passed
+        as ``path_override`` so the URL targets the list RSS endpoint.
+        Repost filtering is disabled because a list has multiple members
+        and the single-username ``_is_repost_link`` check does not apply;
+        the HTML fallback path handles retweet detection via markup.
+        """
+        return await self._fetch_tweets_for_scheduler_from_instances(
+            list_id,
+            anchor_ids,
+            self.instances,
+            skip_plain_text=skip_plain_text,
+            retry_attempts=self.retry_attempts,
+            filter_reposts=False,
+            path_override=f"i/lists/{quote(str(list_id).strip(), safe='')}",
         )
 
     async def _fetch_tweets_for_scheduler_from_instances(
@@ -505,6 +536,8 @@ class NitterClient:
         retry_attempts: int | None = None,
         total_retry_attempts_per_instance: bool = False,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> tuple[str, SchedulerFetchResult]:
         errors: list[str] = []
         empty_instances: list[str] = []
@@ -539,6 +572,7 @@ class NitterClient:
                         1,
                         total_retry_attempts_per_instance,
                         filter_reposts,
+                        path_override=path_override,
                     )
                 except EmptyFeedError as exc:
                     if instance not in empty_instances:
@@ -886,6 +920,8 @@ class NitterClient:
         retry_attempts: int | None = None,
         total_retry_attempts_per_instance: bool = False,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> SchedulerFetchResult:
         initial_scan = anchor_ids is None
         normalized_anchor_ids = (
@@ -926,6 +962,7 @@ class NitterClient:
                 retry_attempts,
                 attempt_budget,
                 filter_reposts,
+                path_override=path_override,
             )
             if page.raw_item_count == 0 and page.plain_text_filtered == 0:
                 if scanned_item_count == 0:
@@ -1068,6 +1105,8 @@ class NitterClient:
         retry_attempts: int | None = None,
         attempt_budget: FetchAttemptBudget | None = None,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> RssPageResult:
         attempts = self._retry_attempt_count(retry_attempts)
         if attempt_budget is not None:
@@ -1086,6 +1125,7 @@ class NitterClient:
                     limit,
                     skip_plain_text,
                     filter_reposts,
+                    path_override=path_override,
                 )
             except TransientFetchError as exc:
                 last_error = exc
@@ -1119,8 +1159,10 @@ class NitterClient:
         limit: int,
         skip_plain_text: bool = False,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> RssPageResult:
-        rss_url = self._rss_url(instance, username, cursor)
+        rss_url = self._rss_url(instance, username, cursor, path=path_override)
         request = Request(
             rss_url,
             headers=build_request_headers(
@@ -1165,11 +1207,153 @@ class NitterClient:
         return status_code in {408, 429, 500, 502, 503, 504, 520, 522, 523, 524}
 
     @staticmethod
-    def _rss_url(instance: str, username: str, cursor: str = "") -> str:
-        rss_url = f"{instance.rstrip('/')}/{quote(username)}/rss"
+    def _rss_url(
+        instance: str, username: str, cursor: str = "", *, path: str = ""
+    ) -> str:
+        segment = path or quote(username)
+        rss_url = f"{instance.rstrip('/')}/{segment}/rss"
         if cursor:
             rss_url = f"{rss_url}?{urlencode({'cursor': cursor})}"
         return rss_url
+
+    @staticmethod
+    def _list_rss_url(instance: str, list_id: str, cursor: str = "") -> str:
+        return NitterClient._rss_url(
+            instance, "", cursor, path=f"i/lists/{quote(list_id, safe='')}"
+        )
+
+    @staticmethod
+    def _merged_rss_url(instance: str, usernames: list[str], cursor: str = "") -> str:
+        """Build merged multi-user RSS URL: ``/{user1,user2,...}/rss``.
+
+        Usernames are validated to contain only ``[A-Za-z0-9_]`` so raw
+        commas are safe in the path segment (no percent-encoding needed).
+        """
+        joined = ",".join(str(u).strip().lstrip("@") for u in usernames if u)
+        return NitterClient._rss_url(instance, "", cursor, path=joined)
+
+    # Safety margin below the ~280-char path-segment limit observed on
+    # self-hosted Nitter.  Exceeding it returns HTTP 404.
+    MERGED_RSS_MAX_PATH = 250
+
+    @staticmethod
+    def batch_usernames_by_path_length(
+        usernames: list[str], max_length: int = 250
+    ) -> list[list[str]]:
+        """Split usernames into batches whose comma-joined path stays safe."""
+        batches: list[list[str]] = []
+        current: list[str] = []
+        current_len = 0
+        for raw in usernames:
+            user = str(raw or "").strip().lstrip("@")
+            if not user:
+                continue
+            addition = len(user) + (1 if current else 0)  # +1 for comma
+            if current and current_len + addition > max_length:
+                batches.append(current)
+                current = [user]
+                current_len = len(user)
+            else:
+                current.append(user)
+                current_len += addition
+        if current:
+            batches.append(current)
+        return batches
+
+    async def fetch_merged_for_scheduler(
+        self,
+        usernames: list[str],
+        watermarks: dict[str, list[str] | None],
+        *,
+        skip_plain_text: bool = False,
+        filter_reposts: bool | None = None,
+        media: bool = False,
+    ) -> tuple[str, dict[str, "SchedulerFetchResult"]]:
+        """Fetch multiple bloggers via one merged RSS request chain.
+
+        ``/{user1,user2,...}/rss`` returns a combined timeline (newest-first)
+        with each item's link carrying the correct author.  Results are split
+        by ``tweet.username`` so each user gets their own ``SchedulerFetchResult``
+        and the existing per-user seen/watermark logic in the runner works
+        unchanged.
+
+        Repost filtering is implicit: tweets whose author is not in the batch
+        (retweets of outside accounts) land in no user's bucket and are dropped.
+        The ``filter_reposts`` parameter is accepted for API symmetry but not
+        passed to the scan loop.
+        """
+        if not usernames:
+            raise ValueError("no usernames for merged fetch")
+
+        merged_path = ",".join(usernames)
+        if media:
+            merged_path = f"{merged_path}/media"
+
+        # Use the oldest user's watermark as the scan boundary.
+        #
+        # The scan loop stops at the first boundary ID it encounters in the
+        # feed (newest-first).  If we passed the union of all users'
+        # watermarks, the scan would stop at the freshest user's watermark,
+        # silently truncating new tweets belonging to users with older
+        # watermarks.  By passing only the watermark of the user whose newest
+        # (highest) status ID is the lowest, the scan continues past every
+        # other user's newer watermarks and stops at the oldest boundary —
+        # capturing all new tweets for every user in a single scan.
+        oldest_watermark: list[str] = []
+        oldest_max_val: int | None = None
+        has_watermark = False
+        for username in usernames:
+            watermark = watermarks.get(username)
+            if not watermark:
+                continue
+            has_watermark = True
+            user_max_val: int | None = None
+            for sid in watermark:
+                sid_str = str(sid or "").strip()
+                if sid_str and sid_str.isdigit():
+                    val = int(sid_str)
+                    if user_max_val is None or val > user_max_val:
+                        user_max_val = val
+            if user_max_val is not None and (
+                oldest_max_val is None or user_max_val < oldest_max_val
+            ):
+                oldest_max_val = user_max_val
+                oldest_watermark = [
+                    str(sid).strip() for sid in watermark if str(sid or "").strip()
+                ]
+
+        anchor_ids = oldest_watermark if has_watermark else None
+
+        instance, scan_result = await self._fetch_tweets_for_scheduler_from_instances(
+            merged_path,  # used only for logging
+            anchor_ids,
+            self.instances,
+            skip_plain_text=skip_plain_text,
+            retry_attempts=self.retry_attempts,
+            filter_reposts=False,  # author-based splitting handles reposts
+            path_override=merged_path,
+        )
+
+        # Split mixed-author tweets into per-user buckets.
+        results: dict[str, SchedulerFetchResult] = {}
+        for username in usernames:
+            key = username.lower()
+            user_tweets = [
+                t for t in scan_result.tweets if (t.username or "").lower() == key
+            ]
+            user_scanned_ids = [t.status_id for t in user_tweets if t.status_id]
+            results[username] = SchedulerFetchResult(
+                tweets=user_tweets,
+                scanned_status_ids=user_scanned_ids,
+                anchor_status_ids=user_scanned_ids[:20],
+                latest_status_id=(user_scanned_ids[0] if user_scanned_ids else ""),
+                plain_text_filtered=0,
+                reposts_filtered=0,
+                complete=scan_result.complete,
+                reached_watermark=scan_result.reached_watermark,
+            )
+
+        return instance, results
 
     @staticmethod
     def _rotate_instances(instances: list[str], start_index: int = 0) -> list[str]:

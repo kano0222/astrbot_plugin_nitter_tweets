@@ -303,6 +303,7 @@ class _SchedulerNitter:
         }
         self.calls = []
         self.filter_reposts_calls = []
+        self.path_overrides = []
 
     async def fetch_tweets_for_scheduler(
         self,
@@ -310,9 +311,11 @@ class _SchedulerNitter:
         watermark,
         skip_plain_text=False,
         filter_reposts=None,
+        **kwargs,
     ):
         del skip_plain_text
         self.filter_reposts_calls.append(filter_reposts)
+        self.path_overrides.append(kwargs.get("path_override", ""))
         self.calls.append((username, watermark))
         scans = self.scans_by_user[username]
         scan = scans.pop(0) if len(scans) > 1 else scans[0]
@@ -1075,6 +1078,107 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(serial_nitter.filter_reposts_calls, [False])
         self.assertEqual(html_backend.filter_reposts_calls, [False])
         self.assertEqual(concurrent_nitter.filter_reposts_calls, [False])
+
+    async def test_blogger_media_path_only_when_both_plain_text_and_repost_filter_on(
+        self,
+    ):
+        """/<user>/media/rss excludes ALL retweets.  Only switch to it when
+        both skip_plain_text and filter_reposts are active; when the user
+        wants to keep retweets (filter_reposts=False), stay on the regular
+        RSS feed so retweets are not silently dropped.
+        """
+        tweet = self._make_tweet("NASA", "100")
+        scan = [{"tweets": [tweet], "scanned_status_ids": ["100"]}]
+
+        # Case 1: both plain_text and repost filtering on → media path
+        config_both = {
+            "filter_reposts_enabled": True,
+            "tweet_groups": [
+                {
+                    "name": "博主",
+                    "group_id": "b1",
+                    "group_type": "blogger",
+                    "watch_users": ["NASA"],
+                    "push_targets": [],
+                    "filter_reposts_enabled": True,
+                    "filter_plain_text_enabled": True,
+                }
+            ],
+        }
+        nitter_both = _SchedulerNitter({"NASA": scan})
+        sched_both = self._create_scheduler(config_both, nitter=nitter_both)
+        group_both = sched_both._schedule_groups(log_invalid_targets=False)[0]
+        await sched_both._fetch_group_user(
+            group_both, 0, "NASA", 20, True, None, concurrent=False
+        )
+        self.assertEqual(nitter_both.path_overrides, ["NASA/media"])
+
+        # Case 2: plain_text on, repost filter off → regular RSS
+        config_no_repost = {
+            "filter_reposts_enabled": False,
+            "tweet_groups": [
+                {
+                    "name": "博主",
+                    "group_id": "b2",
+                    "group_type": "blogger",
+                    "watch_users": ["NASA"],
+                    "push_targets": [],
+                    "filter_reposts_enabled": False,
+                    "filter_plain_text_enabled": True,
+                }
+            ],
+        }
+        nitter_no_repost = _SchedulerNitter({"NASA": list(scan)})
+        sched_nr = self._create_scheduler(config_no_repost, nitter=nitter_no_repost)
+        group_nr = sched_nr._schedule_groups(log_invalid_targets=False)[0]
+        await sched_nr._fetch_group_user(
+            group_nr, 0, "NASA", 20, True, None, concurrent=False
+        )
+        self.assertEqual(nitter_no_repost.path_overrides, [""])
+
+    async def test_blogger_merged_skipped_when_repost_filter_off(self):
+        """When filter_reposts is off, the merged RSS path must be skipped
+        because author-based splitting drops retweets of outside accounts.
+        Per-user requests are used instead so retweets are preserved.
+        """
+        tweet_a = self._make_tweet("alice", "100")
+        tweet_b = self._make_tweet("bob", "200")
+
+        class _MergedAwareNitter(_SchedulerNitter):
+            def __init__(self, scans):
+                super().__init__(scans)
+                self.merged_called = False
+
+            async def fetch_merged_for_scheduler(self, *a, **kw):
+                self.merged_called = True
+                raise AssertionError("merged path should be skipped")
+
+        config = {
+            "filter_reposts_enabled": False,
+            "tweet_groups": [
+                {
+                    "name": "博主",
+                    "group_id": "b1",
+                    "group_type": "blogger",
+                    "watch_users": ["alice", "bob"],
+                    "push_targets": [],
+                    "filter_reposts_enabled": False,
+                }
+            ],
+        }
+        nitter = _MergedAwareNitter(
+            {
+                "alice": [{"tweets": [tweet_a], "scanned_status_ids": ["100"]}],
+                "bob": [{"tweets": [tweet_b], "scanned_status_ids": ["200"]}],
+            }
+        )
+        scheduler = self._create_scheduler(config, nitter=nitter)
+        group = scheduler._schedule_groups(log_invalid_targets=False)[0]
+        results = await scheduler._fetch_group_users(group, 20, False, {})
+
+        self.assertFalse(nitter.merged_called)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(nitter.calls, [("alice", None), ("bob", None)])
 
     def test_all_targets_delivered_rejects_empty_target_list(self):
         batch = scheduler_module.PendingTweetBatch(
@@ -2623,3 +2727,88 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.new_tweet_count, 0)
         self.assertEqual(second.pushed_target_attempts, 0)
         self.assertEqual(len(sender.sent), 2)
+
+    async def test_concurrent_fetch_passes_path_override_without_type_error(self):
+        from unittest.mock import AsyncMock
+
+        from media_support.client import NitterClient, SchedulerFetchResult
+        from scheduler.runner_fetch import SchedulerFetchMixin
+
+        client = NitterClient({"instances": ["http://127.0.0.1:8080"]})
+        tweet = self._make_tweet("NASA", "101")
+        expected = (
+            "http://127.0.0.1:8080",
+            SchedulerFetchResult(
+                tweets=[tweet], scanned_status_ids=["101"], complete=True
+            ),
+        )
+
+        with patch.object(
+            client,
+            "_fetch_tweets_for_scheduler_from_instances",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as mock_inner:
+            # 1. Direct call to client.fetch_tweets_for_scheduler_from_instances with path_override
+            result = await client.fetch_tweets_for_scheduler_from_instances(
+                "NASA",
+                ["100"],
+                ["http://127.0.0.1:8080"],
+                start_index=0,
+                skip_plain_text=True,
+                retry_attempts=2,
+                filter_reposts=True,
+                path_override="NASA/media",
+            )
+            self.assertEqual(result, expected)
+            mock_inner.assert_awaited_once_with(
+                "NASA",
+                ["100"],
+                ["http://127.0.0.1:8080"],
+                skip_plain_text=True,
+                retry_attempts=2,
+                total_retry_attempts_per_instance=False,
+                filter_reposts=True,
+                path_override="NASA/media",
+            )
+
+        # 2. Integration call through runner._fetch_group_user with concurrent=True
+        runner = SchedulerFetchMixin()
+        runner.nitter = client
+        runner.config = {}
+        runner._log_verbose_info = lambda *args, **kwargs: None
+        runner._effective_filter_reposts = lambda group: True
+
+        group = types.SimpleNamespace(
+            group_id="test",
+            group_type="blogger",
+            is_tag_group=False,
+            is_list_group=False,
+        )
+        with patch.object(
+            client,
+            "_fetch_tweets_for_scheduler_from_instances",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as mock_inner:
+            user_result = await runner._fetch_group_user(
+                group,
+                0,
+                "NASA",
+                20,
+                skip_plain_text=True,
+                scan_watermark=["100"],
+                concurrent=True,
+            )
+            self.assertEqual(user_result.username, "NASA")
+            self.assertIsNone(user_result.error)
+            mock_inner.assert_awaited_once_with(
+                "NASA",
+                ["100"],
+                ["http://127.0.0.1:8080"],
+                skip_plain_text=True,
+                retry_attempts=2,
+                total_retry_attempts_per_instance=False,
+                filter_reposts=True,
+                path_override="NASA/media",
+            )

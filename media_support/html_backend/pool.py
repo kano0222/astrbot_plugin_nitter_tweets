@@ -46,6 +46,7 @@ class PoolConfig:
     retry_delay_base: float = 5.0  # Base delay between global retries (seconds)
     retry_delay_on_cooldown: float = 10.0  # Delay when all instances cooling
     media_quality: str = "high"  # pbs.twimg image quality tier (high/medium/low)
+    search_sort: str = "latest"  # Nitter search f= param: latest=tweets, top=top
 
 
 class HtmlFetchError(RuntimeError):
@@ -380,6 +381,7 @@ class HtmlNitterPool:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[str, HtmlSearchResult]:
         """Search with global retry on total failure."""
         # Skip global retry when targeting a specific instance (probe mode)
@@ -391,6 +393,7 @@ class HtmlNitterPool:
                 instance=instance,
                 max_pages=max_pages,
                 anchor_ids=anchor_ids,
+                sort=sort,
                 **self._repost_filter_kwargs(filter_reposts),
             )
 
@@ -404,6 +407,7 @@ class HtmlNitterPool:
                     instance=instance,
                     max_pages=max_pages,
                     anchor_ids=anchor_ids,
+                    sort=sort,
                     **self._repost_filter_kwargs(filter_reposts),
                 )
             except RuntimeError as exc:
@@ -444,6 +448,7 @@ class HtmlNitterPool:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[str, HtmlSearchResult]:
         q = normalize_query(query)
         if not q:
@@ -480,6 +485,7 @@ class HtmlNitterPool:
                         limit,
                         kind=resolved,
                         max_pages=max_pages,
+                        sort=sort,
                         **(
                             {"anchor_ids": anchor_ids} if anchor_ids is not None else {}
                         ),
@@ -488,7 +494,7 @@ class HtmlNitterPool:
                 )
                 if tweets:
                     if attempts:
-                        tweets.host_attempts = [*attempts, f"{host}=成功"]
+                        tweets.host_attempts = [*attempts, f"#{index}=成功"]
                     self.scores.record_success(host)
                     if index > 1:
                         self.log(
@@ -496,7 +502,7 @@ class HtmlNitterPool:
                         )
                     return base, tweets.limited(limit) if not anchor_ids else tweets
                 empty_success_base = base
-                attempts.append(f"{host}=空结果")
+                attempts.append(f"#{index}=空结果")
                 empty_success_result.raw_item_count += tweets.raw_item_count
                 empty_success_result.retweet_filtered += tweets.retweet_filtered
                 empty_success_result.scan_complete = (
@@ -515,7 +521,7 @@ class HtmlNitterPool:
             except Exception as exc:
                 # Failures scored inside _get_html (including transport errors).
                 errors.append(f"{base}: {exc}")
-                attempts.append(f"{host}={_format_host_failure(exc)}")
+                attempts.append(f"#{index}={_format_host_failure(exc)}")
                 self.log(
                     f"search fail host={host}, rotate next ({index}/{total}): {exc}"
                 )
@@ -630,7 +636,7 @@ class HtmlNitterPool:
                 )
                 if tweets:
                     if attempts:
-                        tweets.host_attempts = [*attempts, f"{host}=成功"]
+                        tweets.host_attempts = [*attempts, f"#{index}=成功"]
                     self.scores.record_success(host)
                     if index > 1:
                         self.log(
@@ -641,7 +647,7 @@ class HtmlNitterPool:
                         tweets.limited(limit) if anchor_ids is None else tweets,
                     )
                 empty_success_base = base
-                attempts.append(f"{host}=空结果")
+                attempts.append(f"#{index}=空结果")
                 empty_success_result.raw_item_count += tweets.raw_item_count
                 empty_success_result.retweet_filtered += tweets.retweet_filtered
                 empty_success_result.scan_complete = (
@@ -659,7 +665,7 @@ class HtmlNitterPool:
                 self.log(f"list empty host={host}, rotate next ({index}/{total})")
             except Exception as exc:
                 errors.append(f"{base}: {exc}")
-                attempts.append(f"{host}={_format_host_failure(exc)}")
+                attempts.append(f"#{index}={_format_host_failure(exc)}")
                 self.log(f"list fail host={host}, rotate next ({index}/{total}): {exc}")
 
         if empty_success_base is not None:
@@ -831,6 +837,7 @@ class HtmlNitterPool:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> HtmlSearchResult:
         initial_scan = not anchor_ids
         boundary_ids = {
@@ -850,7 +857,11 @@ class HtmlNitterPool:
         pages = self.config.max_pages if max_pages is None else max_pages
         page_count = self._page_count(pages)
         for page_i in range(page_count):
-            params = {"f": "tweets", "q": query}
+            effective_sort = sort if sort is not None else self.config.search_sort
+            params = {
+                "f": "top" if effective_sort == "top" else "tweets",
+                "q": query,
+            }
             if cursor:
                 params["cursor"] = cursor
             path = "/search?" + urlencode(params)

@@ -19,7 +19,7 @@ AstrBot WebUI 的 `tweet_groups` 添加时先选 **博主分组**（`blogger`）
 
 | 配置键 | 用途 | 说明 |
 | --- | --- | --- |
-| `instances`（`basic`） | RSS、HTML 搜索/List | 仅填写自建 Nitter，可配多个；无默认公共实例 |
+| `instances`（`basic`） | RSS、HTML 搜索、List RSS | 仅填写自建 Nitter，可配多个；无默认公共实例 |
 
 同一自建实例同时承担 RSS 和 HTML。旧版 `search_instances`、`blogger_html_instances`、`concurrent_fetch_instances` 已删除，仅在启动日志中提示，不读取、不迁移、不写回。
 
@@ -39,7 +39,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 - `name`: 显示名，可用于命令。
 - `group_id`: 存储 ID。新建默认分组为 `default`；由插件自动分配并保持稳定，已有值（包括旧 `global`）保留。缺失时，安全英文数字分组名会作为旧 ID 继承，否则自动补齐为 `group_N`。
-- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag/List 组通过 HTML 搜索。
+- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag 组通过 HTML 搜索；List 组优先走 RSS（`/i/lists/<id>/rss`），失败回退 HTML 翻页。
 - `enabled`: 是否启用。
 - `watch_users`: **Blogger 组**博主订阅源；其他类型忽略。
 - `watch_queries`: **Tag 组**搜索订阅列表。**落盘为字符串列表**（如 `#圣娅`、`蔚蓝档案`）。前导 `#` → tag，否则 phrase；phrase 禁止自动加 `#`。仍可读旧 `{query,type}` 对象，但会规范成字符串，避免 AstrBot `list` 显示 `[object Object]`。
@@ -48,7 +48,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 - `interval_check_enabled`: 是否参与全局间隔检查。
 - `daily_check_times`: 每日检查时间。
 - `filter_reposts_enabled`: 分组级转发过滤子开关，默认 `true`；只有全局同名总开关也开启时才过滤。
-- `filter_plain_text_enabled`: 是否过滤无作者媒体的纯文本推文（博主 RSS 与标签/HTML 路径均适用）。
+- `filter_plain_text_enabled`: 是否过滤无作者媒体的纯文本推文。博主 RSS 在转发过滤也开启时改走 `/{user}/media/rss` 相册专线（含合并流），转发过滤关闭时保持主页 RSS 由本地过滤以保留转推；Tag 搜索追加 `filter:media` 服务端过滤并辅以本地兜底；List RSS 仅做本地过滤。手动命令不受影响。
 - `omit_status_url`: 该分组定时发送时去除推文链接（默认 `true`）。开启后不附带原文 URL 明文，并去掉正文/译文中的 http(s)；关闭时普通正文/译文中的外部链接保留，但当前 Nitter 来源实例改写出的同站镜像链接仍会清理。Telegram 在作者头部使用 Markdown 链接到推文，并在底层发送时关闭网页预览。仅媒体模式不调用翻译。
 - `hide_original_when_translated`: 分组级；有译文时隐藏原文（在全局 `show_original_when_translated=true` 时生效）。
 - `media_only_enabled`: 定时推送只发送作者和成功准备的媒体；受全局媒体开关及单条媒体数量上限控制，全局不可用时回退完整内容。
@@ -70,7 +70,9 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 后台**博主**检查固定扫描 RSS 首屏约 20 条；首屏未命中上次最多 20 个扫描基准 ID 时按 `Min-Id` 翻页直到命中任意基准，然后按推文 ID 与 seen 做差集并发送全部新推文。旧配置中的 `scheduled_fetch_limit` 会在迁移时清理，不再作为运行参数。
 
-后台**Tag/List**检查：每个 `watch_query` 或 `watch_list` 走 `instances` 的 HTML，组内串行、订阅源之间按 `send_user_interval` 等待。首轮最多取 20 条建立基准；已有水位时本轮扫描可超过 20 条，并按 `html_max_pages` 翻页到旧水位或游标结束，持久化水位仍最多保存 20 个 ID。达到页数上限仍未命中旧基准时，`max_tweets_per_check=0` 会跳过推送并自动重建当前第一页基准，正数会按上限推送后再重建；首屏没有有效状态 ID、发送准备失败或基准写入失败时保留旧水位，发送调用失败则跳过当前批次并推进 seen。二者都按全局和分组双层开关决定是否过滤转发，可选纯文本/仅媒体，再与 seen（`q:...` / `list:...`）差集后发送新帖（`max_tweets_per_check > 0` 时按该上限截断，默认不限制）。首次有可用结果只 init 不推历史；真正空首轮不初始化 seen 或扫描水位；有原始结果但全被过滤时记录空扫描水位。
+后台**Tag**检查：每个 `watch_query` 走 `instances` 的 HTML 搜索，组内串行、订阅源之间按 `send_user_interval` 等待。首轮最多取 20 条建立基准；已有水位时本轮扫描可超过 20 条，并按 `html_max_pages` 翻页到旧水位或游标结束，持久化水位仍最多保存 20 个 ID。达到页数上限仍未命中旧基准时，`max_tweets_per_check=0` 会跳过推送并自动重建当前第一页基准，正数会按上限推送后再重建；首屏没有有效状态 ID、发送准备失败或基准写入失败时保留旧水位，发送调用失败则跳过当前批次并推进 seen。按全局和分组双层开关决定是否过滤转发，可选纯文本/仅媒体，再与 seen（`q:...`）差集后发送新帖（`max_tweets_per_check > 0` 时按该上限截断，默认不限制）。首次有可用结果只 init 不推历史；真正空首轮不初始化 seen 或扫描水位；有原始结果但全被过滤时记录空扫描水位。
+
+后台**List**检查：每个 `watch_list` 优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标），按 `Min-Id` 分页到旧水位（同 Blogger RSS）；RSS 发生网络/HTTP 异常或扫描未完成时回退 HTML 翻页（同 Tag 的 `html_max_pages` 约束），扫描完成无新推文时不触发回退。其余过滤、纯文本/仅媒体、`max_tweets_per_check` 和首轮初始化行为与 Tag 一致，seen 键为 `list:<id>`。
 
 `check_on_startup=true` 时，调度存储初始化完成后按分组顺序首检所有启用且同时配置订阅源和有效推送目标的分组；仅每日定点、仅间隔和没有定时槽位的分组都执行一次。首检完成后锚定当前间隔/每日槽位，避免同一轮重复触发。手动 `/推文检查` 仍要求当前会话属于该分组的 `push_targets`，只是会等待同一套存储初始化完成。
 

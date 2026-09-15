@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from command_handlers.manual import ManualCommandMixin
+from scheduler.runner_send import SchedulerSendMixin
 from shared.observability import (
     format_elapsed,
     safe_log,
@@ -138,3 +140,81 @@ def test_safe_log_formats_single_line_diagnostic_event(monkeypatch):
         message
         == "[NitterTweets] event=host_failover | from_host=nitter.top | to_host=nitter.tiekoetter.com | reason=HTTP_429"
     )
+
+
+# --- has_translation suppression tests (f19d28a regression) ---
+
+
+def test_manual_log_ai_skipped_when_translation_disabled(monkeypatch):
+    """Manual path: translator.enabled=False suppresses all per-tweet AI logs."""
+    mock_logger = MagicMock()
+    monkeypatch.setattr("command_handlers.manual.logger", mock_logger)
+
+    host = ManualCommandMixin()
+    host.translator = SimpleNamespace(enabled=False)
+
+    host._log_ai_process_results("test", [MagicMock(), MagicMock()], None)
+    mock_logger.info.assert_not_called()
+
+
+def test_manual_log_ai_emits_when_translation_enabled(monkeypatch):
+    """Manual path: translator.enabled=True still logs per-tweet AI summaries."""
+    mock_logger = MagicMock()
+    monkeypatch.setattr("command_handlers.manual.logger", mock_logger)
+    monkeypatch.setattr(
+        "command_handlers.manual.format_ai_tweet_summary",
+        lambda *a, **kw: "dummy",
+    )
+
+    host = ManualCommandMixin()
+    host.translator = SimpleNamespace(enabled=True)
+
+    host._log_ai_process_results("test", [MagicMock()], None)
+    assert mock_logger.info.call_count == 1
+
+
+def test_scheduler_log_ai_skipped_when_translation_disabled(monkeypatch):
+    """Scheduler path: translator.enabled=False suppresses per-tweet AI logs."""
+    mock_logger = MagicMock()
+    monkeypatch.setattr("scheduler.runner_send.logger", mock_logger)
+    monkeypatch.setattr(
+        "scheduler.runner_send.format_ai_tweet_summary",
+        lambda *a, **kw: "dummy",
+    )
+
+    runner = SchedulerSendMixin()
+    runner.translator = SimpleNamespace(enabled=False)
+    runner.brief_log_enabled = False
+
+    runner._log_ai_process_results("test", [MagicMock(), MagicMock()], None)
+    mock_logger.info.assert_not_called()
+
+
+def test_scheduler_log_ai_skipped_when_brief_log_enabled(monkeypatch):
+    """Scheduler path: brief_log_enabled also suppresses per-tweet AI logs."""
+    mock_logger = MagicMock()
+    monkeypatch.setattr("scheduler.runner_send.logger", mock_logger)
+
+    runner = SchedulerSendMixin()
+    runner.translator = SimpleNamespace(enabled=True)
+    runner.brief_log_enabled = True
+
+    runner._log_ai_process_results("test", [MagicMock()], None)
+    mock_logger.info.assert_not_called()
+
+
+def test_scheduler_log_ai_emits_when_enabled_and_not_brief(monkeypatch):
+    """Scheduler path: both translator.enabled and not brief → logs emitted."""
+    mock_logger = MagicMock()
+    monkeypatch.setattr("scheduler.runner_send.logger", mock_logger)
+    monkeypatch.setattr(
+        "scheduler.runner_send.format_ai_tweet_summary",
+        lambda *a, **kw: "dummy",
+    )
+
+    runner = SchedulerSendMixin()
+    runner.translator = SimpleNamespace(enabled=True)
+    runner.brief_log_enabled = False
+
+    runner._log_ai_process_results("test", [MagicMock(), MagicMock()], None)
+    assert mock_logger.info.call_count == 2

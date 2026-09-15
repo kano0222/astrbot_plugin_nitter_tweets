@@ -12,14 +12,16 @@ from astrbot.api import logger
 
 try:
     from ..config import config_get, parse_config_bool
-    from ..shared import TweetItem, format_subscription_source
+    from ..media_support.client import NitterClient
+    from ..shared import TweetItem, format_subscription_source, sanitize_sensitive_text
     from .config import ScheduleGroup
     from .models import SchedulerTaskError, SourceStatus, UserFetchResult
 except ImportError:
     from config import config_get, parse_config_bool
+    from media_support.client import NitterClient
     from scheduler.config import ScheduleGroup
     from scheduler.models import SchedulerTaskError, SourceStatus, UserFetchResult
-    from shared import TweetItem, format_subscription_source
+    from shared import TweetItem, format_subscription_source, sanitize_sensitive_text
 
 
 def _classify_html_fetch(
@@ -68,6 +70,24 @@ class SchedulerFetchMixin:
             or group.is_list_group
             or not self._should_use_concurrent_fetch(group)
         ):
+            # Blogger serial path: try merged RSS to collapse N requests into
+            # ceil(N/batch) requests, fall back to per-user on failure.
+            # Skip merged when the user wants to keep retweets: the merged
+            # feed's author-based splitting drops retweets of outside accounts
+            # regardless of filter_reposts, so per-user RSS is required to
+            # preserve them.
+            if (
+                group.is_blogger_group
+                and len(accounts) > 1
+                and self._effective_filter_reposts(group)
+            ):
+                return await self._fetch_group_users_merged(
+                    group,
+                    accounts,
+                    fetch_limit,
+                    skip_plain_text,
+                    scan_watermarks,
+                )
             results = []
             for index, username in enumerate(accounts):
                 # Add delay between queries (except before the first one)
@@ -105,6 +125,108 @@ class SchedulerFetchMixin:
         ]
         return list(await asyncio.gather(*tasks))
 
+    async def _fetch_group_users_merged(
+        self,
+        group: ScheduleGroup,
+        accounts: list[str],
+        fetch_limit: int,
+        skip_plain_text: bool,
+        scan_watermarks: dict[str, list[str]],
+    ) -> list[UserFetchResult]:
+        """Fetch blogger group via merged RSS, falling back to per-user."""
+        filter_reposts = self._effective_filter_reposts(group)
+        batches = NitterClient.batch_usernames_by_path_length(accounts)
+        results: list[UserFetchResult] = []
+        global_index = 0
+
+        for batch_i, batch in enumerate(batches):
+            if batch_i > 0 and group.send_user_interval > 0:
+                await asyncio.sleep(group.send_user_interval)
+
+            batch_watermarks = {
+                username: scan_watermarks.get(username) for username in batch
+            }
+            source_label = f"@{batch[0]}" if len(batch) == 1 else f"{len(batch)} 位博主"
+            self._log_verbose_info(
+                f"[NitterTweets] 合并 RSS 抓取开始: group={group.group_id}, "
+                f"users={source_label}, batch={batch_i + 1}/{len(batches)}"
+            )
+
+            try:
+                instance, merged_results = await self.nitter.fetch_merged_for_scheduler(
+                    batch,
+                    batch_watermarks,
+                    skip_plain_text=skip_plain_text,
+                    filter_reposts=filter_reposts,
+                    media=skip_plain_text and filter_reposts,
+                )
+            except Exception as exc:
+                error_label = sanitize_sensitive_text(str(exc))
+                logger.warning(
+                    f"[NitterTweets] 合并 RSS 抓取失败，回退逐个请求: "
+                    f"group={group.group_id}, batch={batch_i + 1}/{len(batches)}, "
+                    f"error={type(exc).__name__}: {error_label}"
+                )
+                # Fall back to per-user for the entire batch
+                for username in batch:
+                    if global_index > 0 and group.send_user_interval > 0:
+                        await asyncio.sleep(group.send_user_interval)
+                    results.append(
+                        await self._fetch_group_user(
+                            group,
+                            global_index,
+                            username,
+                            fetch_limit,
+                            skip_plain_text,
+                            scan_watermarks.get(username),
+                            concurrent=False,
+                        )
+                    )
+                    global_index += 1
+                continue
+
+            # Build per-user results from the merged scan; fall back to
+            # per-user for any user with no tweets in the merged feed.
+            for username in batch:
+                scan_result = merged_results.get(username)
+                if scan_result and scan_result.tweets:
+                    self._log_verbose_info(
+                        f"[NitterTweets] 合并 RSS 命中 @{username}: "
+                        f"tweets={len(scan_result.tweets)}"
+                    )
+                    results.append(
+                        UserFetchResult(
+                            index=global_index,
+                            username=username,
+                            instance=instance,
+                            tweets=list(scan_result.tweets),
+                            scanned_status_ids=list(scan_result.scanned_status_ids),
+                            anchor_status_ids=list(scan_result.anchor_status_ids),
+                            latest_status_id=str(scan_result.latest_status_id or ""),
+                            scan_complete=bool(scan_result.complete),
+                            plain_text_filtered=int(
+                                scan_result.plain_text_filtered or 0
+                            ),
+                        )
+                    )
+                else:
+                    # No tweets for this user in merged feed; try per-user
+                    # RSS/HTML to catch anything the merged scan missed.
+                    results.append(
+                        await self._fetch_group_user(
+                            group,
+                            global_index,
+                            username,
+                            fetch_limit,
+                            skip_plain_text,
+                            scan_watermarks.get(username),
+                            concurrent=False,
+                        )
+                    )
+                global_index += 1
+
+        return results
+
     async def _fetch_group_user(
         self,
         group: ScheduleGroup,
@@ -138,6 +260,13 @@ class SchedulerFetchMixin:
                 filter_reposts=filter_reposts,
             )
         try:
+            # /<user>/media/rss shows only the author's own media uploads
+            # and excludes ALL retweets.  Only switch to it when both
+            # plain-text and repost filtering are active; otherwise keep
+            # the regular RSS feed and filter plain text locally so that
+            # retweets the user wants to keep are not silently dropped.
+            use_media_path = skip_plain_text and filter_reposts
+            media_path = f"{username}/media" if use_media_path else ""
             scheduler_method = (
                 "fetch_tweets_for_scheduler_from_instances"
                 if concurrent
@@ -154,6 +283,7 @@ class SchedulerFetchMixin:
                         skip_plain_text=skip_plain_text,
                         retry_attempts=getattr(self.nitter, "retry_attempts", 2),
                         filter_reposts=filter_reposts,
+                        path_override=media_path,
                     )
                 else:
                     instance, scan_result = await fetch_for_scheduler(
@@ -161,6 +291,7 @@ class SchedulerFetchMixin:
                         scan_watermark,
                         skip_plain_text=skip_plain_text,
                         filter_reposts=filter_reposts,
+                        path_override=media_path,
                     )
                 raw_anchor_status_ids = getattr(scan_result, "anchor_status_ids", None)
                 anchor_status_ids = (
@@ -345,15 +476,23 @@ class SchedulerFetchMixin:
         )
 
         try:
+            # When filter_plain_text is on, append filter:media for server-side
+            # filtering so Nitter returns only media-carrying tweets.
+            effective_query = query_item.query
+            if skip_plain_text and "filter:media" not in effective_query:
+                effective_query = f"{effective_query} filter:media"
             search_kwargs = {
                 "kind": query_item.type,
                 "filter_reposts": filter_reposts,
+                # Background tag scanning must always use f=tweets (time order)
+                # for correct incremental seen/watermark logic; never f=top.
+                "sort": "latest",
             }
             if scan_watermark is not None:
                 search_kwargs["anchor_ids"] = scan_watermark
             instance, tweets = await asyncio.to_thread(
                 lambda: self.nitter.search(
-                    query_item.query,
+                    effective_query,
                     fetch_limit,
                     **search_kwargs,
                 )
@@ -420,7 +559,7 @@ class SchedulerFetchMixin:
         skip_plain_text: bool = False,
         filter_reposts: bool = True,
     ) -> UserFetchResult:
-        """Fetch Twitter List timeline through the unified Nitter service."""
+        """Fetch Twitter List timeline: RSS first, HTML fallback."""
         # account_key format: "list:1234567890"
         if not account_key.startswith("list:"):
             return UserFetchResult(
@@ -439,6 +578,43 @@ class SchedulerFetchMixin:
             f"source={source_label}, limit={fetch_limit}"
         )
 
+        # --- RSS path (primary) ---
+        rss_error: Exception | None = None
+        try:
+            instance, scan_result = await self.nitter.fetch_list_for_scheduler(
+                list_id,
+                scan_watermark,
+                skip_plain_text=skip_plain_text,
+                filter_reposts=filter_reposts,
+            )
+            tweets = list(scan_result.tweets)
+            if tweets or scan_result.complete:
+                self._log_verbose_info(
+                    f"[NitterTweets] List RSS 抓取成功: group={group.group_id}, "
+                    f"source={source_label}, instance={instance}, "
+                    f"tweets={len(tweets)}"
+                )
+                return UserFetchResult(
+                    index=index,
+                    username=account_key,
+                    instance=instance,
+                    tweets=tweets,
+                    scanned_status_ids=list(scan_result.scanned_status_ids),
+                    anchor_status_ids=list(scan_result.anchor_status_ids),
+                    latest_status_id=str(scan_result.latest_status_id or ""),
+                    scan_complete=bool(scan_result.complete),
+                    plain_text_filtered=int(scan_result.plain_text_filtered or 0),
+                )
+        except Exception as exc:
+            rss_error = exc
+            error_label = sanitize_sensitive_text(str(exc))
+            logger.warning(
+                f"[NitterTweets] List RSS 抓取失败，尝试 HTML 后备: "
+                f"group={group.group_id}, source={source_label}, "
+                f"error={type(exc).__name__}: {error_label}"
+            )
+
+        # --- HTML path (fallback) ---
         try:
             instance, tweets = await asyncio.to_thread(
                 lambda: self.nitter.fetch_list(
@@ -452,8 +628,6 @@ class SchedulerFetchMixin:
             html_raw_item_count = max(0, int(getattr(tweets, "raw_item_count", 0) or 0))
             scan_complete = bool(getattr(tweets, "scan_complete", True))
             raw_anchor_status_ids = getattr(tweets, "anchor_status_ids", None)
-            # HtmlSearchResult is populated by the HTML layer; only legacy
-            # adapters returning a bare list need this compatibility fallback.
             anchor_status_ids = (
                 [tweet.status_id for tweet in tweets[:20] if tweet.status_id]
                 if raw_anchor_status_ids is None
@@ -462,7 +636,7 @@ class SchedulerFetchMixin:
             host_attempts = list(getattr(tweets, "host_attempts", []) or [])
             tweets = list(tweets)
             self._log_verbose_info(
-                f"[NitterTweets] List 抓取成功: group={group.group_id}, "
+                f"[NitterTweets] List HTML 后备抓取成功: group={group.group_id}, "
                 f"source={source_label}, instance={instance}, "
                 f"tweets={len(tweets)}"
             )
@@ -471,6 +645,12 @@ class SchedulerFetchMixin:
                 f"[NitterTweets] List 抓取失败: group={group.group_id}, "
                 f"source={source_label}, error={type(exc).__name__}: {exc}"
             )
+            if rss_error is not None:
+                return UserFetchResult(
+                    index=index,
+                    username=account_key,
+                    error=SchedulerTaskError.from_exception(rss_error),
+                )
             return UserFetchResult(
                 index=index,
                 username=account_key,

@@ -1,7 +1,7 @@
 # 推文订阅
 
 <p align="center">
-  <a href="https://github.com/shitianyaa/astrbot_plugin_nitter_tweets/releases"><img alt="Version" src="https://img.shields.io/badge/version-1.4.0-blue?style=for-the-badge" /></a>
+  <a href="https://github.com/shitianyaa/astrbot_plugin_nitter_tweets/releases"><img alt="Version" src="https://img.shields.io/badge/version-1.5.0-blue?style=for-the-badge" /></a>
   <a href="https://github.com/shitianyaa/astrbot_plugin_nitter_tweets/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/shitianyaa/astrbot_plugin_nitter_tweets?style=for-the-badge&color=blue" /></a>
   <a href="https://github.com/Soulter/AstrBot"><img alt="AstrBot" src="https://img.shields.io/badge/AstrBot-plugin-00A86B?style=for-the-badge" /></a>
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
@@ -62,7 +62,7 @@
 
 | 场景 | 能力 |
 | --- | --- |
-| 手动 | `/推文`、`/推文搜索`、`/镜像测试` |
+| 手动 | `/推文`、`/推文搜索`、`/推文搜图`、`/镜像测试` |
 | 链接 | 可选被动解析聊天中的 status 链接（默认关） |
 | 定时 | `tweet_groups`：`blogger` / `tag` / `list` 分组推送 |
 | 发送 | 私人号 OneBot 合并转发；QQ Official 正文使用官方 Markdown API，媒体独立发送；Telegram / Lark / 微信 OC 等普通发送；Telegram 推文链接保留但不展开网页预览 |
@@ -76,10 +76,12 @@
 ```text
 /推文 nasa
 /推文搜索 #标签
+/推文搜索 deepseek娘 -3 -top
+/推文搜图 关键词
 /镜像测试 https://your-nitter.example.com
 ```
 
-数量可省略（用 `default_limit`）。`/镜像测试` 仅管理员。说明与边界见 [进阶说明](./docs/advanced.md)。
+数量可省略（用 `default_limit`）。支持 CLI 风格 flag：`-<数量>`（如 `-3`）、`-n <数量>`、`-top`（或 `--top`、`-热门`）、`-last`（或 `--last`、`-最新`，强制时间序），不影响查询内容。`/镜像测试` 仅管理员。说明与边界见 [进阶说明](./docs/advanced.md)。
 
 ### 2. 最小后台推送
 
@@ -145,14 +147,15 @@ curl -fsSL https://raw.githubusercontent.com/shitianyaa/nitter-installer/main/ni
 | 命令 | 权限 | 说明 |
 | --- | --- | --- |
 | `/推文 用户名 [数量]` | 普通 | 查公开用户最近推文 |
-| `/推文搜索 关键词 [数量]` | 普通 | HTML 搜索；标签请带 `#` |
+| `/推文搜索 关键词 [数量] [热门]` | 普通 | HTML 搜索；标签请带 `#`；`-3` `-top` `-last` 精准控制 |
+| `/推文搜图 关键词 [数量] [热门]` | 普通 | 只搜带图片/视频的推文（`filter:media`）；正文照常显示 |
 | `/镜像测试 … 实例URL` | 管理员 | 临时测试一个自建 Nitter 实例（RSS 优先，HTML 自动后备） |
 | `/推文状态` | 管理员 | 调度与分组状态 |
 | `/推文检查 [分组名]` | 管理员 | 立即检查（当前会话须在该组 `push_targets`） |
 | `/推文黑名单 添加/删除/查看` | 管理员 | 按当前或指定 UMO 维护跨分组共享的作者黑名单 |
 | `/推文缓存清理` | 管理员 | 清媒体缓存 |
 | `/推文记录清理 确认` | 管理员 | 清推送记录 |
-| `/订阅导入` `/订阅删除` `/订阅列表` `/订阅导出` `/订阅去重` | 管理员 | 博主订阅 |
+| `/订阅导入` `/订阅删除` `/订阅列表` `/订阅导出` `/订阅去重` | 管理员 | 订阅管理（列表/导出显示全部分组） |
 | `/标签导入` `/标签删除` | 管理员 | 标签订阅（须带分组名） |
 
 List 通过配置文件或 WebUI 添加 ID，暂无导入命令。
@@ -165,6 +168,7 @@ List 通过配置文件或 WebUI 添加 ID，暂无导入命令。
 | --- | --- |
 | `instances` | 唯一 Nitter 实例列表，同时用于用户 RSS/HTML、搜索、List 和后台并发抓取 |
 | `default_limit` | 手动命令默认条数 |
+| `search_sort` | 搜索排序方式：`latest`（按时间序，默认）或 `top`（推特综合热门算法流）；手动搜索带「热门」可单次覆盖 |
 | `schedule_enabled` | 后台检查总开关 |
 | `push.target_blocked_users` | 按完整 UMO 保存作者黑名单；命令和 Dashboard 维护，跨分组共享 |
 | `tweet_groups` | 订阅与推送分组 |

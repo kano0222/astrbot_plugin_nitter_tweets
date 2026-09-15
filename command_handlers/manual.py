@@ -188,14 +188,38 @@ class ManualCommandMixin:
             started=started,
         )
 
-    async def _cmd_tweet_search_impl(self, event: AstrMessageEvent, args=GreedyStr):
-        """HTML 搜索公开推文：标签请带 #，短语直接写。"""
+    async def _cmd_tweet_search_impl(
+        self,
+        event: AstrMessageEvent,
+        args=GreedyStr,
+        *,
+        is_media_search: bool = False,
+    ):
+        """HTML 搜索公开推文：标签请带 #，短语直接写。
+
+        ``is_media_search=True`` 时自动追加 ``filter:media`` 并本地兜底过滤。
+        """
         event.stop_event()
 
-        query, limit, error = self._parse_search_args(event, args)
+        extra_prefixes = ("推文搜图", "tweetpic", "搜推图") if is_media_search else ()
+        query, limit, sort, error = self._parse_search_args(
+            event, args, extra_prefixes=extra_prefixes
+        )
         if error:
             await event.send(event.plain_result(error))
             return
+
+        # Append filter:media for media-only search (server-side, best effort).
+        effective_query = query
+        if is_media_search and "filter:media" not in effective_query:
+            effective_query = f"{effective_query} filter:media"
+            if len(effective_query) > MAX_QUERY_LENGTH:
+                await event.send(
+                    event.plain_result(
+                        f"查询内容过长（加上搜图过滤后最多 {MAX_QUERY_LENGTH} 字符）。"
+                    )
+                )
+                return
 
         cooldown_left = self._cooldown_left(event, scope="search")
         if cooldown_left > 0:
@@ -208,7 +232,7 @@ class ManualCommandMixin:
 
         session_id = self._search_session_id(event)
         store = self._get_search_session_store()
-        query_key = self._search_query_key(query)
+        query_key = self._search_query_key(effective_query, sort)
         buf = store.get_or_create(session_id, query_key)
 
         sent_progress = [0]
@@ -279,14 +303,18 @@ class ManualCommandMixin:
         try:
             instance, fetched = await asyncio.to_thread(
                 self.nitter.search,
-                query,
+                effective_query,
                 fetch_limit,
                 max_pages=pages,
+                sort=sort or None,
             )
         except TypeError:
             try:
                 instance, fetched = await asyncio.to_thread(
-                    self.nitter.search, query, fetch_limit
+                    self.nitter.search,
+                    effective_query,
+                    fetch_limit,
+                    sort=sort or None,
                 )
             except Exception as exc:
                 logger.warning(f"[NitterTweets] 搜索失败 query={query!r}: {exc}")
@@ -319,9 +347,13 @@ class ManualCommandMixin:
             )
             return
 
-        added = buf.add_tweets(list(fetched or []), instance=instance or "")
+        fetched_list = list(fetched or [])
+        # Local fallback: drop pure-text tweets for media-only search.
+        if is_media_search:
+            fetched_list = [t for t in fetched_list if t.media]
+        added = buf.add_tweets(fetched_list, instance=instance or "")
         logger.info(
-            f"[NitterTweets] search buffer session={session_id!r} query={query!r} "
+            f"[NitterTweets] search buffer session={session_id!r} query={effective_query!r} "
             f"fetched={len(fetched or [])} added={added} pool={len(buf)}"
         )
 
@@ -370,42 +402,136 @@ class ManualCommandMixin:
             started=search_started,
         )
 
-    def _parse_search_args(self, event: AstrMessageEvent, args=GreedyStr):
+    def _parse_search_args(
+        self,
+        event: AstrMessageEvent,
+        args=GreedyStr,
+        *,
+        extra_prefixes: tuple[str, ...] = (),
+    ):
         text = ""
         if args is not None and str(args).strip():
             text = str(args).strip()
         else:
             text = (event.get_message_str() or "").strip()
             # strip command token
-            for prefix in ("/推文搜索", "推文搜索", "/tweetsearch", "tweetsearch"):
+            prefixes = (
+                "/推文搜索",
+                "推文搜索",
+                "/tweetsearch",
+                "tweetsearch",
+                *(f"/{p}" for p in extra_prefixes),
+                *extra_prefixes,
+            )
+            for prefix in prefixes:
                 if text.startswith(prefix):
                     text = text[len(prefix) :].strip()
                     break
+
+        # --- CLI flag extraction (whitelist, token-boundary safe) ---
+        # If any known flag is present, extract all known flags and use the
+        # remaining text verbatim as the query — no heuristic sort/limit
+        # guessing.  Unknown dash-prefixed tokens (e.g. -valorant,
+        # -filter:retweets, -min_faves:100) stay in the query untouched.
+        _USAGE_HINT = (
+            "用法：/推文搜索 <query> [-数量] [-top] [-last]\n"
+            "标签请带 #，例如：#圣娅\n"
+            "普通词/短语直接写：python programming\n"
+            "排序：-top（热门）-last（最新）；数量：-5 或 -n 5 或末尾数字\n"
+            "示例：/推文搜索 deepseek娘 -3 -top"
+        )
+
+        limit_re = re.compile(r"(?<!\S)(?:-n|--limit)\s+(\d+)(?!\S)", re.IGNORECASE)
+        bare_limit_re = re.compile(r"(?<!\S)-(\d+)(?!\S)")
+        sort_re = re.compile(
+            r"(?<!\S)(?:-top|--top|-热门|--热门|-last|--last|-最新|--最新)(?!\S)",
+            re.IGNORECASE,
+        )
+
+        has_flag = bool(
+            limit_re.search(text) or bare_limit_re.search(text) or sort_re.search(text)
+        )
+
+        if has_flag:
+            # Branch A: explicit CLI flags detected.
+            # Extract limit (last match wins), then sort, then the rest = query.
+            limit = int(getattr(self, "search_default_limit", self.default_limit))
+            # Collect limit matches from both -n/--limit and bare -<num>;
+            # last position wins so "-3 -n 5" → 5 and "-n 5 -3" → 3.
+            limit_tokens: list[tuple[int, int]] = []
+            for m in limit_re.finditer(text):
+                limit_tokens.append((m.start(), int(m.group(1))))
+            for m in bare_limit_re.finditer(text):
+                limit_tokens.append((m.start(), int(m.group(1))))
+            if limit_tokens:
+                limit_tokens.sort(key=lambda t: t[0])
+                limit = limit_tokens[-1][1]
+                text = limit_re.sub("", text)
+                text = bare_limit_re.sub("", text)
+
+            # Sort: last flag wins — -last/--last/-最新 → "latest", else "top".
+            sort = ""
+            sort_matches = list(sort_re.finditer(text))
+            if sort_matches:
+                token = sort_matches[-1].group(0).lstrip("-").lower()
+                sort = "latest" if token in ("last", "最新") else "top"
+            text = sort_re.sub("", text)
+            query = re.sub(r"\s+", " ", text).strip()
+
+            if not query:
+                return "", 0, "", _USAGE_HINT
+            max_limit = int(getattr(self, "search_max_limit", 10))
+            if limit < 1:
+                return "", 0, "", "数量至少为 1。"
+            limit = min(limit, max_limit)
+            if len(query) > MAX_QUERY_LENGTH:
+                return "", 0, "", f"查询内容过长（最多 {MAX_QUERY_LENGTH} 字符）。"
+            return query, limit, sort, ""
+
+        # Branch B: no known flags — backward-compatible heuristic parsing.
+        # Extract optional sort keyword. Only match "top" / "热门" as a
+        # trailing standalone word (after optional limit extraction) to avoid
+        # breaking queries like "top gear" or "toproad".
+        sort = ""
+
+        def _strip_trailing_sort(s: str) -> str:
+            m = re.search(r"\s+(?:top|热门)\s*$", s, re.IGNORECASE)
+            if m:
+                return s[: m.start()].strip()
+            return s
+
+        # Pass 1: check original text for trailing sort keyword (e.g. "纳西妲 热门").
+        stripped = _strip_trailing_sort(text)
+        if stripped != text:
+            text = stripped
+            sort = "top"
+
         if not text:
-            return (
-                "",
-                0,
-                (
-                    "用法：/推文搜索 <query> [数量]\n"
-                    "标签请带 #，例如：#圣娅\n"
-                    "普通词/短语直接写：python programming"
-                ),
-            )
+            return "", 0, "", _USAGE_HINT
         parts = text.rsplit(None, 1)
         limit = int(getattr(self, "search_default_limit", self.default_limit))
         query = text
         if len(parts) == 2 and parts[1].isdigit():
             query = parts[0].strip()
             limit = int(parts[1])
+
+        # Pass 2: after limit extraction, check again (e.g. "纳西妲 top 5" →
+        # limit=5, query="纳西妲 top" → strip trailing "top").
+        if not sort:
+            stripped = _strip_trailing_sort(query)
+            if stripped != query:
+                query = stripped
+                sort = "top"
+
         max_limit = int(getattr(self, "search_max_limit", 10))
         if limit < 1:
-            return "", 0, "数量至少为 1。"
+            return "", 0, "", "数量至少为 1。"
         limit = min(limit, max_limit)
         if not query:
-            return "", 0, "查询内容不能为空。"
+            return "", 0, "", "查询内容不能为空。"
         if len(query) > MAX_QUERY_LENGTH:
-            return "", 0, f"查询内容过长（最多 {MAX_QUERY_LENGTH} 字符）。"
-        return query, limit, ""
+            return "", 0, "", f"查询内容过长（最多 {MAX_QUERY_LENGTH} 字符）。"
+        return query, limit, sort, ""
 
     async def _cmd_mirror_probe_impl(self, event: AstrMessageEvent, args=GreedyStr):
         """用临时自建 Nitter 实例测试用户时间线。"""
@@ -589,6 +715,11 @@ class ManualCommandMixin:
         progress_index: int = 0,
         progress_total: int = 0,
     ) -> None:
+        # Skip per-tweet AI log when translation is off — the
+        # "translation=off" line adds no value and clutters the log
+        # for every tweet in the batch.
+        if not getattr(self.translator, "enabled", True):
+            return
         total = progress_total or len(tweets)
         start = progress_index or 1
         for offset, tweet in enumerate(tweets):
@@ -838,7 +969,7 @@ class ManualCommandMixin:
         group = safe_call(event, "get_group_id") or "private"
         return f"{group}:{sender}"
 
-    def _search_query_key(self, query: str) -> str:
+    def _search_query_key(self, query: str, sort: str = "") -> str:
         q = str(query or "").strip()
         try:
             from ..media_support.html_backend.query import normalize_query
@@ -846,11 +977,15 @@ class ManualCommandMixin:
             try:
                 from media_support.html_backend.query import normalize_query
             except ImportError:
-                return q.casefold()
-        try:
-            return normalize_query(q).casefold()
-        except Exception:
-            return q.casefold()
+                base = q.casefold()
+            else:
+                base = normalize_query(q).casefold()
+        else:
+            base = normalize_query(q).casefold()
+        # Include sort in the key so explicit latest/top searches don't share
+        # a cache with the no-flag path (which falls back to config search_sort).
+        suffix = f"\0{sort}" if sort else ""
+        return f"{base}{suffix}"
 
     def _get_search_session_store(self):
         store = getattr(self, "_search_session_store", None)

@@ -409,7 +409,7 @@ class SchedulerSendMixin:
     ) -> None:
         total = progress_total or len(tweets)
         start = progress_index or 1
-        if self.brief_log_enabled:
+        if self.brief_log_enabled or not getattr(self.translator, "enabled", True):
             return
         for offset, tweet in enumerate(tweets):
             logger.info(

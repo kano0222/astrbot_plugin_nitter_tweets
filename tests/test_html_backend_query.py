@@ -79,13 +79,306 @@ def test_manual_search_reports_query_length_before_network_call():
     host = ManualCommandMixin()
     host.default_limit = 5
     host.search_max_limit = 10
-    query, limit, error = host._parse_search_args(
+    query, limit, _sort, error = host._parse_search_args(
         SimpleNamespace(get_message_str=lambda: ""),
         "x" * (MAX_QUERY_LENGTH + 1),
     )
     assert query == ""
     assert limit == 0
     assert str(MAX_QUERY_LENGTH) in error
+
+
+def test_parse_search_args_top_keyword_extracts_sort():
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "纳西妲 top 5",
+    )
+    assert query == "纳西妲"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
+def test_parse_search_args_hot_keyword_extracts_sort():
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "纳西妲 热门",
+    )
+    assert query == "纳西妲"
+    assert sort == "top"
+    assert not error
+
+
+def test_parse_search_args_top_in_query_not_stripped():
+    """'top' inside a query word like 'toproad' must not be stripped."""
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "toproad 5",
+    )
+    assert query == "toproad"
+    assert sort == ""
+    assert not error
+
+
+def test_parse_search_args_top_gear_not_stripped():
+    """'top gear' as a multi-word query must not lose 'top'."""
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "top gear 5",
+    )
+    assert query == "top gear"
+    assert sort == ""
+    assert not error
+
+
+# --- CLI flag extraction tests ---
+
+
+def _parse(text, default_limit=5, max_limit=10):
+    host = ManualCommandMixin()
+    host.default_limit = default_limit
+    host.search_max_limit = max_limit
+    return host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        text,
+    )
+
+
+def test_flag_preserves_query_with_top_and_number():
+    """hltv top 10 — 'top' and '10' are part of the query, flags extract cleanly."""
+    query, limit, sort, error = _parse("hltv top 10 -n 10 -top")
+    assert query == "hltv top 10"
+    assert limit == 10
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_limit_with_pure_number_query():
+    """1984 -n 5 — book title '1984' must not be consumed as a limit."""
+    query, limit, sort, error = _parse("1984 -n 5")
+    assert query == "1984"
+    assert limit == 5
+    assert sort == ""
+    assert not error
+
+
+def test_flag_preceding_query():
+    """Flags before the query text."""
+    query, limit, sort, error = _parse("-top -n 8 蔚蓝档案")
+    assert query == "蔚蓝档案"
+    assert limit == 8
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_trailing_query():
+    """Flags after the query text."""
+    query, limit, sort, error = _parse("蔚蓝档案 -top -n 8")
+    assert query == "蔚蓝档案"
+    assert limit == 8
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_preserves_twitter_exclude_syntax():
+    """csgo -valorant — Twitter exclusion '-valorant' must stay in query."""
+    query, limit, sort, error = _parse("csgo -valorant -n 5 -top")
+    assert query == "csgo -valorant"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_not_partial_match_in_larger_word():
+    """-topgear must not be consumed as the -top flag."""
+    query, limit, sort, error = _parse("-topgear -n 3")
+    # -topgear is not a known flag → branch B (no flags detected)
+    # -topgear stays in query, -n 3 is also not detected because
+    # -topgear consumes the - prefix so limit_re won't find -n
+    # Actually: limit_re scans the whole text independently,
+    # so -n 3 IS found. -topgear is NOT in sort_re (token boundary).
+    assert query == "-topgear"
+    assert limit == 3
+    assert sort == ""
+    assert not error
+
+
+def test_flag_n_must_be_standalone_number():
+    """-n 5G should not match (5G is not a standalone number)."""
+    query, limit, sort, error = _parse("蔚蓝档案 -n 5G")
+    # No valid flag → branch B backward-compat: "蔚蓝档案 -n 5G"
+    # rsplit last token "5G" is not digit → query = whole text
+    assert query == "蔚蓝档案 -n 5G"
+    assert sort == ""
+    assert not error
+
+
+def test_flag_backward_compat_trailing_hot():
+    """Old-style '纳西妲 5 热门' still works without flags."""
+    query, limit, sort, error = _parse("纳西妲 5 热门")
+    assert query == "纳西妲"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_backward_compat_top_before_number():
+    """Old-style '纳西妲 top 5' still works without flags."""
+    query, limit, sort, error = _parse("纳西妲 top 5")
+    assert query == "纳西妲"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
+# --- bare -<number> and -last flag tests ---
+
+
+def test_flag_bare_number_limit():
+    """-3 is a shorthand for -n 3."""
+    query, limit, sort, error = _parse("deepseek娘 -3")
+    assert query == "deepseek娘"
+    assert limit == 3
+    assert sort == ""
+    assert not error
+
+
+def test_flag_bare_number_with_sort():
+    """The original bug report: 'deepseek娘 -3 -top' must not leak -3 into query."""
+    query, limit, sort, error = _parse("deepseek娘 -3 -top")
+    assert query == "deepseek娘"
+    assert limit == 3
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_last_sort():
+    """-last explicitly forces chronological (f=tweets) sort."""
+    query, limit, sort, error = _parse("deepseek娘 -last")
+    assert query == "deepseek娘"
+    assert sort == "latest"
+    assert not error
+
+
+def test_flag_last_sort_chinese():
+    """-最新 is the Chinese alias for -last."""
+    query, limit, sort, error = _parse("deepseek娘 -最新")
+    assert query == "deepseek娘"
+    assert sort == "latest"
+    assert not error
+
+
+def test_flag_last_overrides_top():
+    """Last sort flag wins: -top -last → latest."""
+    query, limit, sort, error = _parse("deepseek娘 -top -last")
+    assert query == "deepseek娘"
+    assert sort == "latest"
+    assert not error
+
+
+def test_flag_top_overrides_last():
+    """Last sort flag wins: -last -top → top."""
+    query, limit, sort, error = _parse("deepseek娘 -last -top")
+    assert query == "deepseek娘"
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_bare_number_preserves_twitter_exclude():
+    """csgo -valorant -3 — Twitter exclude stays, -3 is the limit."""
+    query, limit, sort, error = _parse("csgo -valorant -3")
+    assert query == "csgo -valorant"
+    assert limit == 3
+    assert not error
+
+
+def test_flag_bare_number_not_partial_in_word():
+    """-5G is not a standalone number, must not match bare limit."""
+    query, limit, sort, error = _parse("deepseek娘 -5G")
+    # No valid flag → branch B backward-compat
+    assert query == "deepseek娘 -5G"
+    assert sort == ""
+    assert not error
+
+
+def test_flag_bare_number_zero_rejected():
+    """-0 → limit 0 → '数量至少为 1。'"""
+    _q, _l, _s, error = _parse("deepseek娘 -0")
+    assert "数量至少为 1" in error
+
+
+def test_flag_dash_letter_not_consumed_as_limit():
+    """-min_faves:100 stays in query; -3 still works as limit."""
+    query, limit, sort, error = _parse("白丝 -min_faves:100 -3")
+    assert "min_faves:100" in query
+    assert limit == 3
+    assert not error
+
+
+def test_flag_bare_and_n_combined_last_wins():
+    """-3 -n 5 → last (5) wins; -n 5 -3 → last (3) wins."""
+    _q, limit_a, _s, _e = _parse("deepseek娘 -3 -n 5")
+    assert limit_a == 5
+    _q, limit_b, _s, _e = _parse("deepseek娘 -n 5 -3")
+    assert limit_b == 3
+
+
+# --- _search_query_key isolation tests ---
+
+
+def test_search_query_key_latest_gets_suffix():
+    """Explicit -last (sort='latest') must not share key with no-flag (sort='')."""
+    host = ManualCommandMixin()
+    key_none = host._search_query_key("deepseek娘", "")
+    key_latest = host._search_query_key("deepseek娘", "latest")
+    key_top = host._search_query_key("deepseek娘", "top")
+    assert key_none != key_latest
+    assert key_none != key_top
+    assert key_latest != key_top
+
+
+def test_media_search_appended_filter_media_exceeds_max_length():
+    """195-char query passes regular search parse, but when is_media_search=True,
+    appending ' filter:media' (208 chars > 200) is gracefully rejected with a warning.
+    """
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+
+    raw_query = "x" * 195
+    # In regular search, parsing passes without length error:
+    q, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        raw_query,
+    )
+    assert error == ""
+    assert q == raw_query
+
+    # In media search via _cmd_tweet_search_impl, appending filter:media causes len > 200
+    # and sends a graceful error message without throwing:
+    event = SimpleNamespace(
+        stop_event=MagicMock(),
+        get_message_str=lambda: "",
+        send=AsyncMock(),
+        plain_result=lambda s: s,
+    )
+    asyncio.run(host._cmd_tweet_search_impl(event, raw_query, is_media_search=True))
+
+    event.send.assert_awaited_once()
+    sent_msg = event.send.call_args[0][0]
+    assert f"加上搜图过滤后最多 {MAX_QUERY_LENGTH} 字符" in sent_msg
 
 
 def test_web_probe_reports_query_length_before_backend_call():
