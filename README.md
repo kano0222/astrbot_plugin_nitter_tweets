@@ -167,6 +167,7 @@ List 通过配置文件或 WebUI 添加 ID，暂无导入命令。
 | --- | --- |
 | `instances` | 唯一 Nitter 实例列表，同时用于用户 RSS/HTML、搜索、List 和后台并发抓取 |
 | `default_limit` | 手动命令默认条数 |
+| `search_sort` | 搜索排序方式：`latest`（按时间序，默认）或 `top`（推特综合热门算法流）；手动搜索带「热门」可单次覆盖 |
 | `schedule_enabled` | 后台检查总开关 |
 | `push.target_blocked_users` | 按完整 UMO 保存作者黑名单；命令和 Dashboard 维护，跨分组共享 |
 | `tweet_groups` | 订阅与推送分组 |
