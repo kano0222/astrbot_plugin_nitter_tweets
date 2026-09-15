@@ -427,28 +427,47 @@ class ManualCommandMixin:
         # guessing.  Unknown dash-prefixed tokens (e.g. -valorant,
         # -filter:retweets, -min_faves:100) stay in the query untouched.
         _USAGE_HINT = (
-            "用法：/推文搜索 <query> [-n 数量] [-top]\n"
+            "用法：/推文搜索 <query> [-数量] [-top] [-last]\n"
             "标签请带 #，例如：#圣娅\n"
             "普通词/短语直接写：python programming\n"
-            "排序：-top 或 热门；数量：-n 5 或末尾数字\n"
-            "示例：/推文搜索 hltv top 10 -n 10 -top"
+            "排序：-top（热门）-last（最新）；数量：-5 或 -n 5 或末尾数字\n"
+            "示例：/推文搜索 deepseek娘 -3 -top"
         )
 
         limit_re = re.compile(r"(?<!\S)(?:-n|--limit)\s+(\d+)(?!\S)", re.IGNORECASE)
-        sort_re = re.compile(r"(?<!\S)(?:-top|--top|-热门|--热门)(?!\S)", re.IGNORECASE)
+        bare_limit_re = re.compile(r"(?<!\S)-(\d+)(?!\S)")
+        sort_re = re.compile(
+            r"(?<!\S)(?:-top|--top|-热门|--热门|-last|--last|-最新|--最新)(?!\S)",
+            re.IGNORECASE,
+        )
 
-        has_flag = bool(limit_re.search(text) or sort_re.search(text))
+        has_flag = bool(
+            limit_re.search(text) or bare_limit_re.search(text) or sort_re.search(text)
+        )
 
         if has_flag:
             # Branch A: explicit CLI flags detected.
             # Extract limit (last match wins), then sort, then the rest = query.
             limit = int(getattr(self, "search_default_limit", self.default_limit))
-            limit_matches = list(limit_re.finditer(text))
-            if limit_matches:
-                limit = int(limit_matches[-1].group(1))
+            # Collect limit matches from both -n/--limit and bare -<num>;
+            # last position wins so "-3 -n 5" → 5 and "-n 5 -3" → 3.
+            limit_tokens: list[tuple[int, int]] = []
+            for m in limit_re.finditer(text):
+                limit_tokens.append((m.start(), int(m.group(1))))
+            for m in bare_limit_re.finditer(text):
+                limit_tokens.append((m.start(), int(m.group(1))))
+            if limit_tokens:
+                limit_tokens.sort(key=lambda t: t[0])
+                limit = limit_tokens[-1][1]
                 text = limit_re.sub("", text)
+                text = bare_limit_re.sub("", text)
 
-            sort = "top" if sort_re.search(text) else ""
+            # Sort: last flag wins — -last/--last/-最新 → "latest", else "top".
+            sort = ""
+            sort_matches = list(sort_re.finditer(text))
+            if sort_matches:
+                token = sort_matches[-1].group(0).lstrip("-").lower()
+                sort = "latest" if token in ("last", "最新") else "top"
             text = sort_re.sub("", text)
             query = re.sub(r"\s+", " ", text).strip()
 
@@ -692,10 +711,7 @@ class ManualCommandMixin:
         # Skip per-tweet AI log when translation is off — the
         # "translation=off" line adds no value and clutters the log
         # for every tweet in the batch.
-        has_translation = translation_report is not None and getattr(
-            translation_report, "tweet_results", None
-        )
-        if not has_translation:
+        if not getattr(self.translator, "enabled", True):
             return
         total = progress_total or len(tweets)
         start = progress_index or 1
@@ -959,8 +975,9 @@ class ManualCommandMixin:
                 base = normalize_query(q).casefold()
         else:
             base = normalize_query(q).casefold()
-        # Include sort in the key so latest/top searches don't share a cache.
-        suffix = f"\0{sort}" if sort and sort != "latest" else ""
+        # Include sort in the key so explicit latest/top searches don't share
+        # a cache with the no-flag path (which falls back to config search_sort).
+        suffix = f"\0{sort}" if sort else ""
         return f"{base}{suffix}"
 
     def _get_search_session_store(self):

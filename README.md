@@ -76,12 +76,12 @@
 ```text
 /推文 nasa
 /推文搜索 #标签
-/推文搜索 hltv top 10 -n 10 -top
+/推文搜索 deepseek娘 -3 -top
 /推文搜图 关键词
 /镜像测试 https://your-nitter.example.com
 ```
 
-数量可省略（用 `default_limit`）。支持 CLI 风格 flag：`-n <数量>`、`-top`（或 `--top`、`-热门`），不影响查询内容。`/镜像测试` 仅管理员。说明与边界见 [进阶说明](./docs/advanced.md)。
+数量可省略（用 `default_limit`）。支持 CLI 风格 flag：`-<数量>`（如 `-3`）、`-n <数量>`、`-top`（或 `--top`、`-热门`）、`-last`（或 `--last`、`-最新`，强制时间序），不影响查询内容。`/镜像测试` 仅管理员。说明与边界见 [进阶说明](./docs/advanced.md)。
 
 ### 2. 最小后台推送
 
@@ -147,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/shitianyaa/nitter-installer/main/ni
 | 命令 | 权限 | 说明 |
 | --- | --- | --- |
 | `/推文 用户名 [数量]` | 普通 | 查公开用户最近推文 |
-| `/推文搜索 关键词 [数量] [热门]` | 普通 | HTML 搜索；标签请带 `#`；`-n 数量` `-top` 精准控制 |
+| `/推文搜索 关键词 [数量] [热门]` | 普通 | HTML 搜索；标签请带 `#`；`-3` `-top` `-last` 精准控制 |
 | `/推文搜图 关键词 [数量] [热门]` | 普通 | 只搜带图片/视频的推文（`filter:media`）；正文照常显示 |
 | `/镜像测试 … 实例URL` | 管理员 | 临时测试一个自建 Nitter 实例（RSS 优先，HTML 自动后备） |
 | `/推文状态` | 管理员 | 调度与分组状态 |

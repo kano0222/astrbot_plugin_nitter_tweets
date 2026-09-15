@@ -243,6 +243,112 @@ def test_flag_backward_compat_top_before_number():
     assert not error
 
 
+# --- bare -<number> and -last flag tests ---
+
+
+def test_flag_bare_number_limit():
+    """-3 is a shorthand for -n 3."""
+    query, limit, sort, error = _parse("deepseek娘 -3")
+    assert query == "deepseek娘"
+    assert limit == 3
+    assert sort == ""
+    assert not error
+
+
+def test_flag_bare_number_with_sort():
+    """The original bug report: 'deepseek娘 -3 -top' must not leak -3 into query."""
+    query, limit, sort, error = _parse("deepseek娘 -3 -top")
+    assert query == "deepseek娘"
+    assert limit == 3
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_last_sort():
+    """-last explicitly forces chronological (f=tweets) sort."""
+    query, limit, sort, error = _parse("deepseek娘 -last")
+    assert query == "deepseek娘"
+    assert sort == "latest"
+    assert not error
+
+
+def test_flag_last_sort_chinese():
+    """-最新 is the Chinese alias for -last."""
+    query, limit, sort, error = _parse("deepseek娘 -最新")
+    assert query == "deepseek娘"
+    assert sort == "latest"
+    assert not error
+
+
+def test_flag_last_overrides_top():
+    """Last sort flag wins: -top -last → latest."""
+    query, limit, sort, error = _parse("deepseek娘 -top -last")
+    assert query == "deepseek娘"
+    assert sort == "latest"
+    assert not error
+
+
+def test_flag_top_overrides_last():
+    """Last sort flag wins: -last -top → top."""
+    query, limit, sort, error = _parse("deepseek娘 -last -top")
+    assert query == "deepseek娘"
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_bare_number_preserves_twitter_exclude():
+    """csgo -valorant -3 — Twitter exclude stays, -3 is the limit."""
+    query, limit, sort, error = _parse("csgo -valorant -3")
+    assert query == "csgo -valorant"
+    assert limit == 3
+    assert not error
+
+
+def test_flag_bare_number_not_partial_in_word():
+    """-5G is not a standalone number, must not match bare limit."""
+    query, limit, sort, error = _parse("deepseek娘 -5G")
+    # No valid flag → branch B backward-compat
+    assert query == "deepseek娘 -5G"
+    assert sort == ""
+    assert not error
+
+
+def test_flag_bare_number_zero_rejected():
+    """-0 → limit 0 → '数量至少为 1。'"""
+    _q, _l, _s, error = _parse("deepseek娘 -0")
+    assert "数量至少为 1" in error
+
+
+def test_flag_dash_letter_not_consumed_as_limit():
+    """-min_faves:100 stays in query; -3 still works as limit."""
+    query, limit, sort, error = _parse("白丝 -min_faves:100 -3")
+    assert "min_faves:100" in query
+    assert limit == 3
+    assert not error
+
+
+def test_flag_bare_and_n_combined_last_wins():
+    """-3 -n 5 → last (5) wins; -n 5 -3 → last (3) wins."""
+    _q, limit_a, _s, _e = _parse("deepseek娘 -3 -n 5")
+    assert limit_a == 5
+    _q, limit_b, _s, _e = _parse("deepseek娘 -n 5 -3")
+    assert limit_b == 3
+
+
+# --- _search_query_key isolation tests ---
+
+
+def test_search_query_key_latest_gets_suffix():
+    """Explicit -last (sort='latest') must not share key with no-flag (sort='')."""
+    host = ManualCommandMixin()
+    key_none = host._search_query_key("deepseek娘", "")
+    key_latest = host._search_query_key("deepseek娘", "latest")
+    key_top = host._search_query_key("deepseek娘", "top")
+    assert key_none != key_latest
+    assert key_none != key_top
+    assert key_latest != key_top
+
+
 def test_web_probe_reports_query_length_before_backend_call():
     plugin = MagicMock()
     plugin.config = {}

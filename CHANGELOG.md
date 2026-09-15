@@ -11,13 +11,14 @@
 - 博主分组后台检查新增合并 RSS 管道：多博主分组自动使用 `/{user1,user2,...}/rss` 合并请求，按 URL 路径段字符长度自动分批（安全阈值 250 字符，对齐实测 ~280 死线），将 N 次 RSS 请求压缩为少数几批。合并流以批次中水位最低（最旧）的博主为扫描边界，确保所有博主的新推文都被完整捕获，不会因高位水位提前截断而漏推。合并失败自动回退逐个请求；合并流中无推文的博主也会回退逐个请求。合并流每条推文自带作者，按作者拆分后 seen/水位逻辑不变。
 - 文档新增「高级搜索语法」节：说明 `min_faves:`、`min_retweets:`、`min_replies:`、布尔 `OR`/`NOT`、`from:` 多博主聚合等推特高级检索操作符的写法和限制（本地截断 200 字符）。
 - `/推文搜索` 和 `/推文搜图` 新增 CLI 风格 flag：`-n <数量>`、`--limit <数量>`、`-top`/`--top`/`-热门`/`--热门`（大小写不敏感）。检测到已知 flag 时精准提取，剩余文本原样作为查询词，不再猜测词尾的「热门」或数字——`hltv top 10 -n 10 -top` 的查询词是 `hltv top 10`。推特排除语法（如 `python -java`）不受影响。无 flag 时走兼容逻辑（老写法 `纳西妲 5 热门` 不变）。
+- `/推文搜索` 和 `/推文搜图` 数量 flag 新增裸数字简写：`-3` 等价于 `-n 3`（仅匹配 dash 后纯数字，不影响 `-min_faves:100` 等含字母的 dash token）。排序新增 `-last`/`--last`/`-最新`/`--最新`（强制时间序 `f=tweets`，可覆盖全局 `search_sort=top`）；多个排序 flag 并存时最后一个生效。
 
 ### Changed
 
 - List 分组后台检查从 HTML 翻页（`/i/lists/<id>`，单页 20 条）改为 RSS 优先（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）；RSS 失败或无结果时自动回退 HTML 翻页。seen key `list:<id>` 和 `SchedulerFetchResult` 结构不变。
 - `filter_plain_text_enabled` 云端优化：开启后，tag 分组搜索自动追加 `filter:media`（推特云端过滤），blogger 分组在转发过滤也开启时自动切换为 `/{user}/media/rss` 相册专线（含合并流 `/{user1,user2}/media/rss`）；若转发过滤关闭则保持主页 RSS 由本地过滤，避免相册端点吞掉用户想保留的转推。list 分组维持本地过滤（无 `/media/rss` 端点）。请求量大幅降低。
 - 后台 Tag 扫描强制 `f=tweets`（时间序），不受全局 `search_sort=top` 影响，保证增量 seen/水位逻辑正确。
-- 手动搜索 session buffer 的 query_key 纳入 sort，`latest` 和 `top` 模式的缓存互不串台。
+- 手动搜索 session buffer 的 query_key 纳入 sort；显式 `-last`（`latest`）与 `-top`（`top`）各自独立缓存，与无 flag（走全局 `search_sort` 默认）也不串台。
 - 手动合并转发传输梯度排序修复：PATH 失败后先走无损的 BASE64/URL 重试（`_retry_forward_with_transport`），仍失败才走有损的去视频降级。此前顺序反了，导致 AstrBot 与 NapCat 分容器时本地文件读不到直接丢视频，跳过了可用的 BASE64 内联和 URL 直链兜底。
 - `/订阅列表` 从只显示默认分组博主改为遍历全部分组概览（博主列前 5 个用户名、标签列前 5 个查询、List 只显示数量不列 18-20 位 ID）。
 - `/推文状态` 的 List ID 行从默认 10 个改为 3 个（每个 ID 18-20 位数字，10 个刷屏）。
@@ -29,6 +30,7 @@
 - 合并 RSS 多用户水位碰撞漏推：合并流此前将所有用户的水位 union 后作为扫描边界，扫描器在命中最高的（最新的）水位时即停止，导致水位较低的博主排在停止点之后的新推文被截断漏推。改为只传入批次中水位最低（最旧）的博主的完整水位，扫描器越过其他用户更新的水位继续到最旧水位才停，一次扫描捕获所有博主的新推文。
 - 相册专线与转发保留意图冲突：`filter_plain_text_enabled` 开启时无条件切换到 `/{user}/media/rss`，但该端点排除所有转发。当用户想保留转推（`filter_reposts_enabled=false`）时，转推中的图片/视频被云端永久吞掉。改为仅在转发过滤也开启时才切换到相册专线，否则保持主页 RSS 由本地过滤。
 - 合并流不支持保留转推：合并 RSS 按作者拆分时会丢弃批次外作者的转推条目（与 `filter_reposts` 开关无关）。当用户关闭转发过滤（想保留转推）时，自动跳过合并流改走逐个请求，确保转推不被静默丢弃。合并流仅在转发过滤开启时生效。
+- 关闭 AI 翻译时逐条「AI 处理完成」日志仍刷屏（f19d28a 回归）：`has_translation` 检查依赖 `translation_report.tweet_results` 的真值，但 `attach_translations` 在翻译关闭时给每条推文塞 `status="off"` 的非空列表，Python 非空列表永远 truthy，导致拦截从未生效。改为直接查 `self.translator.enabled` 配置真源。
 
 ## [1.4.0] - 2026-09-05
 

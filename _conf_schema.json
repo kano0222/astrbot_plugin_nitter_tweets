@@ -78,7 +78,7 @@
           "latest",
           "top"
         ],
-        "hint": "latest=按时间序（对应 f=tweets，默认）；top=按热门度（对应 f=top，推特综合算法流）。主要影响手动 /推文搜索 与 /推文搜图；后台 Tag 增量扫描强制保持最新时间序，博主与 List RSS 不受影响。手动搜索可用「热门」或「top」关键词单次覆盖。"
+        "hint": "latest=按时间序（对应 f=tweets，默认）；top=按热门度（对应 f=top，推特综合算法流）。主要影响手动 /推文搜索 与 /推文搜图；后台 Tag 增量扫描强制保持最新时间序，博主与 List RSS 不受影响。手动搜索可用「-top」按热门排序，或「-last」强制时间序（覆盖全局 top 设置）。"
       },
       "html_max_pages": {
         "description": "HTML 最大翻页数",
