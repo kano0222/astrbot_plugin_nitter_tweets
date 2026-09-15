@@ -355,7 +355,7 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 - 兼容读取旧的 `{query, type}` 对象，启动/保存时会规范成字符串，避免 AstrBot 配置列表显示成 `[object Object]`。
 - 若配置里已出现字面量 `[object Object]`，该项无效，请删除后重新填写 `#标签` 或短语。
 - 运行时：tag 可回退 `/hashtag/`，phrase 仅 `/search`。
-- 手动：`/推文搜索 <query> [数量] [热门]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准；List RSS 按 `Min-Id` 分页到旧水位（同 Blogger），RSS 失败回退时同 Tag。加「热门」或「top」按热度排序（`f=top`），否则按全局 `search_sort` 配置。`/推文搜图` 用法相同，但自动追加 `filter:media` 只返回带图片/视频的推文，正文照常显示。
+- 手动：`/推文搜索 <query> [数量] [热门]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准；List RSS 按 `Min-Id` 分页到旧水位（同 Blogger），RSS 失败回退时同 Tag。加「热门」或「top」按热度排序（`f=top`），否则按全局 `search_sort` 配置。`/推文搜图` 用法相同，但自动追加 `filter:media` 只返回带图片/视频的推文，正文照常显示。支持 CLI 风格 flag：`-n <数量>`、`--limit <数量>`、`-top`/`--top`/`-热门`/`--热门`（大小写不敏感）。检测到已知 flag 时精准提取，剩余文本原样作为查询词——不再猜测词尾的「热门」或数字，因此 `hltv top 10 -n 10 -top` 的查询词是 `hltv top 10`。推特排除语法（如 `python -java`）不受影响——`-java` 不在白名单内，完整保留在查询词中。无 flag 时走兼容逻辑（`纳西妲 5 热门` 等老写法不变）。
 
 ### 高级搜索语法
 

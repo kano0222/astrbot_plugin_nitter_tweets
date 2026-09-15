@@ -143,6 +143,106 @@ def test_parse_search_args_top_gear_not_stripped():
     assert not error
 
 
+# --- CLI flag extraction tests ---
+
+
+def _parse(text, default_limit=5, max_limit=10):
+    host = ManualCommandMixin()
+    host.default_limit = default_limit
+    host.search_max_limit = max_limit
+    return host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        text,
+    )
+
+
+def test_flag_preserves_query_with_top_and_number():
+    """hltv top 10 — 'top' and '10' are part of the query, flags extract cleanly."""
+    query, limit, sort, error = _parse("hltv top 10 -n 10 -top")
+    assert query == "hltv top 10"
+    assert limit == 10
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_limit_with_pure_number_query():
+    """1984 -n 5 — book title '1984' must not be consumed as a limit."""
+    query, limit, sort, error = _parse("1984 -n 5")
+    assert query == "1984"
+    assert limit == 5
+    assert sort == ""
+    assert not error
+
+
+def test_flag_preceding_query():
+    """Flags before the query text."""
+    query, limit, sort, error = _parse("-top -n 8 蔚蓝档案")
+    assert query == "蔚蓝档案"
+    assert limit == 8
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_trailing_query():
+    """Flags after the query text."""
+    query, limit, sort, error = _parse("蔚蓝档案 -top -n 8")
+    assert query == "蔚蓝档案"
+    assert limit == 8
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_preserves_twitter_exclude_syntax():
+    """csgo -valorant — Twitter exclusion '-valorant' must stay in query."""
+    query, limit, sort, error = _parse("csgo -valorant -n 5 -top")
+    assert query == "csgo -valorant"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_not_partial_match_in_larger_word():
+    """-topgear must not be consumed as the -top flag."""
+    query, limit, sort, error = _parse("-topgear -n 3")
+    # -topgear is not a known flag → branch B (no flags detected)
+    # -topgear stays in query, -n 3 is also not detected because
+    # -topgear consumes the - prefix so limit_re won't find -n
+    # Actually: limit_re scans the whole text independently,
+    # so -n 3 IS found. -topgear is NOT in sort_re (token boundary).
+    assert query == "-topgear"
+    assert limit == 3
+    assert sort == ""
+    assert not error
+
+
+def test_flag_n_must_be_standalone_number():
+    """-n 5G should not match (5G is not a standalone number)."""
+    query, limit, sort, error = _parse("蔚蓝档案 -n 5G")
+    # No valid flag → branch B backward-compat: "蔚蓝档案 -n 5G"
+    # rsplit last token "5G" is not digit → query = whole text
+    assert query == "蔚蓝档案 -n 5G"
+    assert sort == ""
+    assert not error
+
+
+def test_flag_backward_compat_trailing_hot():
+    """Old-style '纳西妲 5 热门' still works without flags."""
+    query, limit, sort, error = _parse("纳西妲 5 热门")
+    assert query == "纳西妲"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
+def test_flag_backward_compat_top_before_number():
+    """Old-style '纳西妲 top 5' still works without flags."""
+    query, limit, sort, error = _parse("纳西妲 top 5")
+    assert query == "纳西妲"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
 def test_web_probe_reports_query_length_before_backend_call():
     plugin = MagicMock()
     plugin.config = {}

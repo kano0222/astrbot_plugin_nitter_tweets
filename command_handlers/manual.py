@@ -421,6 +421,48 @@ class ManualCommandMixin:
                     text = text[len(prefix) :].strip()
                     break
 
+        # --- CLI flag extraction (whitelist, token-boundary safe) ---
+        # If any known flag is present, extract all known flags and use the
+        # remaining text verbatim as the query — no heuristic sort/limit
+        # guessing.  Unknown dash-prefixed tokens (e.g. -valorant,
+        # -filter:retweets, -min_faves:100) stay in the query untouched.
+        _USAGE_HINT = (
+            "用法：/推文搜索 <query> [-n 数量] [-top]\n"
+            "标签请带 #，例如：#圣娅\n"
+            "普通词/短语直接写：python programming\n"
+            "排序：-top 或 热门；数量：-n 5 或末尾数字\n"
+            "示例：/推文搜索 hltv top 10 -n 10 -top"
+        )
+
+        limit_re = re.compile(r"(?<!\S)(?:-n|--limit)\s+(\d+)(?!\S)", re.IGNORECASE)
+        sort_re = re.compile(r"(?<!\S)(?:-top|--top|-热门|--热门)(?!\S)", re.IGNORECASE)
+
+        has_flag = bool(limit_re.search(text) or sort_re.search(text))
+
+        if has_flag:
+            # Branch A: explicit CLI flags detected.
+            # Extract limit (last match wins), then sort, then the rest = query.
+            limit = int(getattr(self, "search_default_limit", self.default_limit))
+            limit_matches = list(limit_re.finditer(text))
+            if limit_matches:
+                limit = int(limit_matches[-1].group(1))
+                text = limit_re.sub("", text)
+
+            sort = "top" if sort_re.search(text) else ""
+            text = sort_re.sub("", text)
+            query = re.sub(r"\s+", " ", text).strip()
+
+            if not query:
+                return "", 0, "", _USAGE_HINT
+            max_limit = int(getattr(self, "search_max_limit", 10))
+            if limit < 1:
+                return "", 0, "", "数量至少为 1。"
+            limit = min(limit, max_limit)
+            if len(query) > MAX_QUERY_LENGTH:
+                return "", 0, "", f"查询内容过长（最多 {MAX_QUERY_LENGTH} 字符）。"
+            return query, limit, sort, ""
+
+        # Branch B: no known flags — backward-compatible heuristic parsing.
         # Extract optional sort keyword. Only match "top" / "热门" as a
         # trailing standalone word (after optional limit extraction) to avoid
         # breaking queries like "top gear" or "toproad".
@@ -439,17 +481,7 @@ class ManualCommandMixin:
             sort = "top"
 
         if not text:
-            return (
-                "",
-                0,
-                "",
-                (
-                    "用法：/推文搜索 <query> [数量] [热门]\n"
-                    "标签请带 #，例如：#圣娅\n"
-                    "普通词/短语直接写：python programming\n"
-                    "加「热门」或「top」按热度排序"
-                ),
-            )
+            return "", 0, "", _USAGE_HINT
         parts = text.rsplit(None, 1)
         limit = int(getattr(self, "search_default_limit", self.default_limit))
         query = text
