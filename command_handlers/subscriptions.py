@@ -38,31 +38,45 @@ except ImportError:
 
 class SubscriptionCommandMixin:
     async def _cmd_tweets_list_impl(self, event: AstrMessageEvent):
-        """查看已配置的定时订阅账号列表。"""
+        """查看已配置的定时订阅列表（全部分组概览）。"""
         event.stop_event()
-        info = self.scheduler.watch_users_info()
+        groups = self.scheduler.config_reader.schedule_groups(log_invalid_targets=False)
+        if not groups:
+            await event.send(event.plain_result("Nitter 订阅列表\n没有可用分组。"))
+            return
 
+        total_sources = sum(len(g.account_keys) for g in groups)
+        total_targets = sum(len(g.targets) for g in groups)
         lines = [
-            "Nitter 订阅账号列表",
-            f"原配置项: {info.raw_count} 个",
-            f"有效账号: {len(info.users)} 个",
-            f"重复项: {len(info.duplicates)} 个",
-            f"无效项: {len(info.invalid_entries)} 个",
+            "Nitter 订阅列表",
+            f"分组: {len(groups)} 个",
+            f"订阅源: {total_sources} 个",
+            f"推送目标: {total_targets} 个",
         ]
-        if info.users:
-            lines.append("账号列表:")
-            lines.extend(
-                f"{index}. @{user}" for index, user in enumerate(info.users[:10], 1)
+        for group in groups:
+            if group.is_tag_group:
+                type_label = "标签"
+                source_label = f"{len(group.queries)} 个查询"
+            elif group.is_list_group:
+                type_label = "List"
+                source_label = f"{len(group.list_ids)} 个 List"
+            else:
+                type_label = "博主"
+                source_label = f"{len(group.users)} 个博主"
+            lines.append(
+                f"\n【{group.name or group.group_id}】{type_label}，"
+                f"{source_label}，{len(group.targets)} 个目标"
             )
-            if len(info.users) > 10:
-                lines.append(f"... 还有 {len(info.users) - 10} 个")
-        else:
-            lines.append("账号列表为空。")
-        if info.duplicates:
-            lines.append("重复项: " + self._format_limited_values(info.duplicates))
-        if info.invalid_entries:
-            lines.append("无效项: " + self._format_limited_values(info.invalid_entries))
-
+            if group.is_blogger_group and group.users:
+                items = [f"@{u}" for u in group.users]
+                lines.append("  " + self._format_limited_values(items, limit=5))
+            elif group.is_tag_group and group.queries:
+                items = [item.query for item in group.queries]
+                lines.append("  " + self._format_limited_values(items, limit=5))
+            elif group.is_list_group and group.list_ids:
+                lines.append(
+                    f"  （List ID {len(group.list_ids)} 个，详情见 /推文状态）"
+                )
         await event.send(event.plain_result("\n".join(lines)))
 
     async def _cmd_tweets_export_subscriptions_impl(

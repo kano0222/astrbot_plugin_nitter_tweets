@@ -18,6 +18,10 @@
 - 后台 Tag 扫描强制 `f=tweets`（时间序），不受全局 `search_sort=top` 影响，保证增量 seen/水位逻辑正确。
 - 手动搜索 session buffer 的 query_key 纳入 sort，`latest` 和 `top` 模式的缓存互不串台。
 - 手动合并转发传输梯度排序修复：PATH 失败后先走无损的 BASE64/URL 重试（`_retry_forward_with_transport`），仍失败才走有损的去视频降级。此前顺序反了，导致 AstrBot 与 NapCat 分容器时本地文件读不到直接丢视频，跳过了可用的 BASE64 内联和 URL 直链兜底。
+- `/订阅列表` 从只显示默认分组博主改为遍历全部分组概览（博主列前 5 个用户名、标签列前 5 个查询、List 只显示数量不列 18-20 位 ID）。
+- `/推文状态` 的 List ID 行从默认 10 个改为 3 个（每个 ID 18-20 位数字，10 个刷屏）。
+- 关闭 AI 翻译时不再输出逐条「AI 处理完成」日志（`translation=off` 行无信息量且刷屏）。
+- 实例结果不再泄露实例 IP/域名地址：HTML 路径用轮换序号 `#1=成功` 代替地址，RSS 路径单实例直接输出 `成功`。
 
 ### Fixed
 

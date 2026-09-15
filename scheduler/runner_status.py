@@ -299,11 +299,13 @@ class SchedulerStatusMixin:
                     + self._format_limited_values(group.queries_info.invalid_entries)
                 )
         elif group.is_list_group and group.list_ids:
-            lines.append("  List ID: " + self._format_limited_values(group.list_ids))
+            lines.append(
+                "  List ID: " + self._format_limited_values(group.list_ids, limit=3)
+            )
             if group.lists_info.duplicates:
                 lines.append(
                     "  重复 List ID: "
-                    + self._format_limited_values(group.lists_info.duplicates)
+                    + self._format_limited_values(group.lists_info.duplicates, limit=3)
                 )
             if group.lists_info.invalid_entries:
                 lines.append(
