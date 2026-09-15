@@ -272,10 +272,10 @@ HTML 简略规则（`[NitterTweets][html]`，由 `QuietHtmlLog` 实现）：
 - 强制准备图片/视频（无视全局图视频开关与 `max_media_per_tweet`），仍受大小、时长、超时限制。
 - 翻译走现有 `TweetTranslator`；原文显隐仅看全局 `show_original_when_translated`（与手动一致，无分组覆盖）。
 - 发送版式复用现有 Sender；正文布局 R1（译文为主文，原文 `>` 引用；无「翻译/原文」小标题）；默认 `omit_status_url=true`。
-- 展示时间统一为 **Asia/Shanghai（UTC+8）** `YYYY-MM-DD HH:MM:SS`（RSS、链接解析、HTML 搜索/List、渲染兜底）。
+- 展示时间统一为 **Asia/Shanghai（UTC+8）** `YYYY-MM-DD HH:MM:SS`（RSS、链接解析、HTML 搜索、List RSS、渲染兜底）。
 - 同会话同 status 约 60 秒防抖（成功发送后记录）；单条消息最多 3 个不同链接。
 
-- 首次启用某个订阅源时，会初始化当前扫描到的 seen ID 和独立扫描基准组，不推送历史内容；Tag/List 首轮边界见“Tag/List 分组与 HTML 搜索”。
+- 首次启用某个订阅源时，会初始化当前扫描到的 seen ID 和独立扫描基准组，不推送历史内容；Tag/List 首轮边界见”Tag 搜索与 List 分组调度”。
 - `check_on_startup=true` 时，存储迁移完成后会先按分组串行执行一次首检，再进入间隔/每日槽位轮询；首检日志始终包含分组、类型、订阅源数、目标数、触发原因、结果统计和耗时。缺少订阅源或目标的启用分组只记录明确跳过原因。
 - 后台检查保存上一轮首屏最多 20 个精确基准 ID，并用最近 300 条 seen ID 做逐条去重。当前首屏未命中基准组中的任意 ID 时才按 `Min-Id` 继续翻页；命中基准前所有未 seen 推文都在本轮发送，命中位置及其后的旧内容不参与比较。Tag/List 在页数用尽仍未命中旧基准时，按 `max_tweets_per_check` 处理并在安全条件满足后自动用当前第一页基准重建；发送准备失败、基准无效或基准写入失败时保留旧水位，发送调用失败则按本轮跳过并推进 seen。
 - 旧版顶层 `watch_users`、`push_targets` 和分组相关定时配置会自动迁移到 `default` 默认分组；`tweet_groups` 中的各推送分组会独立运行，并拥有独立的推送记录。
@@ -337,7 +337,7 @@ python scripts\probe_nitter_fetch.py nasa 5 --instance http://nitter:8080 --incl
 python scripts\test_video_download.py https://x.com/user/status/123 --resolution highest --max-duration-minutes 8
 ```
 
-## Tag/List 分组与 HTML 搜索
+## Tag 搜索与 List 分组调度
 
 ### 分组类型
 
@@ -345,7 +345,7 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 - `group_type: tag`：只使用 `watch_queries`，通过 `instances` 的 HTML 搜索；seen 订阅源键为 `q:<casefold query>`。
 - `group_type: list`：只使用 `watch_lists`，优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次返回约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）；RSS 失败或无结果时自动回退 HTML 翻页。seen 订阅源键为 `list:<id>`。List 不新增手动查询命令，继续使用 Dashboard 或配置管理。**创建时间较短的 List 需要过段时间才会被 Nitter 搜索到**，首轮空结果不一定是配置错误。
 - 创建后类型不可改（WebUI 锁定）；不要在同一分组混用 `watch_users`、`watch_queries` 与 `watch_lists`。
-- Tag/List 首轮真正没有搜索结果时不初始化 seen 或扫描水位；若有原始结果但全部被纯转推、纯文本或“仅媒体”策略过滤，则记录空扫描水位。
+- Tag/List 首轮真正没有可用结果时不初始化 seen 或扫描水位；若有原始结果但全部被纯转推、纯文本或”仅媒体”策略过滤，则记录空扫描水位。
 - 管理命令：`/标签导入`、`/标签删除`；与 `/订阅导入`、`/订阅删除` 按类型互斥。
 
 ### 查询规则（配置怎么写）
@@ -355,7 +355,7 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 - 兼容读取旧的 `{query, type}` 对象，启动/保存时会规范成字符串，避免 AstrBot 配置列表显示成 `[object Object]`。
 - 若配置里已出现字面量 `[object Object]`，该项无效，请删除后重新填写 `#标签` 或短语。
 - 运行时：tag 可回退 `/hashtag/`，phrase 仅 `/search`。
-- 手动：`/推文搜索 <query> [数量] [热门]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag/List 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准。加「热门」或「top」按热度排序（`f=top`），否则按全局 `search_sort` 配置。`/推文搜图` 用法相同，但自动追加 `filter:media` 只返回带图片/视频的推文，正文照常显示。
+- 手动：`/推文搜索 <query> [数量] [热门]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准；List RSS 按 `Min-Id` 分页到旧水位（同 Blogger），RSS 失败回退时同 Tag。加「热门」或「top」按热度排序（`f=top`），否则按全局 `search_sort` 配置。`/推文搜图` 用法相同，但自动追加 `filter:media` 只返回带图片/视频的推文，正文照常显示。
 
 ### 高级搜索语法
 
@@ -385,9 +385,10 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 
 ```text
 每个 watch_query 或 watch_list / 每轮检查
-  → HTML 搜索（组内串行，订阅源间按 send_user_interval 等待；默认 html_max_pages=1）
-  → 首轮/无旧基准：最多取首屏 20 条建立基准；已有 Tag/List 水位时本轮扫描可超过 20 条
-  → 在 html_max_pages 内寻找旧水位，命中则正常推送；到达页数仍未命中则视为扫描未完整
+  → Tag: HTML 搜索（组内串行，订阅源间按 send_user_interval 等待；默认 html_max_pages=1）
+  → List: RSS 优先 /i/lists/<id>/rss（单次约 100 条，按 Min-Id 分页同 Blogger）；失败回退 Tag 路径
+  → 首轮/无旧基准：Tag 最多取首屏 20 条；List RSS 首次约 100 条建立基准；已有水位时本轮扫描可超过首屏
+  → Tag 在 html_max_pages 内寻找旧水位；List RSS 按 Min-Id 分页到旧水位（HTML 回退同 Tag）；命中则正常推送，未命中则视为扫描未完整
   → max_tweets_per_check=0：不推送，使用当前第一页最多 20 个有效状态 ID 自动重建基准
   → max_tweets_per_check>0：最多推送 N 条，所有目标处理完后使用当前第一页最多 20 个有效状态 ID 自动重建基准
   → 首屏无有效 ID、发送准备失败或基准写入失败：保留旧水位，允许下轮重试；发送调用失败则跳过当前批次，不在下轮自动重试
@@ -399,7 +400,7 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
   → 发送成功或发送调用失败后目标均视为已处理并写入 seen；媒体准备失败仍不写 seen，下轮重试
 ```
 
-因此 Tag/List「拉到 20 但只推几条」通常是正常的：多数已 seen，或被 RT/纯文本滤掉。已有水位时一轮内可能扫描并发现超过 20 条新推文，但首次基准和每轮持久化水位仍最多保存 20 个 ID；`max_tweets_per_check` 可限制实际发送量。若页数用尽仍找不到旧基准，日志会明确提示扫描未完整和自动重建基准，旧积压可能被跳过。
+因此 Tag/List「拉到 20（List RSS 约 100）但只推几条」通常是正常的：多数已 seen，或被 RT/纯文本滤掉。已有水位时一轮内可能扫描并发现超过首屏数量的新推文，但首次基准和每轮持久化水位仍最多保存 20 个 ID；`max_tweets_per_check` 可限制实际发送量。若页数用尽仍找不到旧基准，日志会明确提示扫描未完整和自动重建基准，旧积压可能被跳过。
 HTTP 层会识别错误页、限流和异常 HTML 响应。自建实例的访问控制应在 Nitter 或反向代理层配置。**默认 `brief_log_enabled=true` 时**不会刷 `session load` / 每次 `try`；主要看 fail、ok after rotate 与结构化检查摘要。关闭简略后才有完整过程日志（`session load` 仍始终抑制）。
 
 **空结果与全量过滤：** Tag/List 都走 `instances`；多站时会轮换。实例 HTTP 成功但本页没有可用推文时返回空列表，**不当作抓取失败**。调度器会区分两种首轮结果：真正没有原始结果时不写 seen 或扫描水位，下一次非空结果仍只用于初始化，不推历史；有原始结果但全部被纯转推、纯文本或“仅媒体”策略过滤时写入空扫描水位，下一轮符合条件的新帖会作为新内容推送。只有全部实例请求异常时才记抓取失败。
@@ -408,13 +409,13 @@ HTTP 层会识别错误页、限流和异常 HTML 响应。自建实例的访问
 
 | 列表 | 用途 |
 |------|------|
-| `instances` | 自建 Nitter；同时用于博主 RSS、Tag/List 和手动搜索 HTML |
+| `instances` | 自建 Nitter；同时用于博主 RSS（含合并流）、List RSS、Tag 搜索和手动搜索 HTML |
 
 旧 `search_instances`、`blogger_html_instances` 和 `concurrent_fetch_instances` 不再参与运行；启动日志只提示被忽略的 origin。新配置只填 `instances`。
 
-HTML 全局串行节流；Tag/List 查询在组内也会按 `send_user_interval` 串行等待。429 冷却约 30s 起、封顶 5 分钟。Cookie 落在插件数据目录 `html_sessions/`。
+Tag 搜索和 List HTML 回退受 HTML 全局串行节流约束；Tag/List 订阅源在组内也会按 `send_user_interval` 串行等待。429 冷却约 30s 起、封顶 5 分钟。Cookie 落在插件数据目录 `html_sessions/`。
 
-搜索/List 实例池有多站时失败会轮换（冷却殿后）。**可用性优先：** 进程内按请求成功率记分，ready 高分优先。
+Tag 搜索和 List 请求在有多站时失败会轮换（冷却殿后）。**可用性优先：** 进程内按请求成功率记分，ready 高分优先。
 
 记分规则（内存，重启清零；统一实例分数由 RSS 与 HTML 共享）：
 
@@ -425,7 +426,7 @@ HTML 全局串行节流；Tag/List 查询在组内也会按 `send_user_interval`
 
 ## RSS 重试与本轮跳过（第二刀）
 
-- `retry_attempts` / `retry_delay_seconds`：全局 basic 配置，默认 2 / 5s。同时用于 HTML 搜索/List 的全局重试：所有实例失败后按此延迟重试，全部实例冷却时延迟为该值的两倍。
+- `retry_attempts` / `retry_delay_seconds`：全局 basic 配置，默认 2 / 5s。同时用于 HTML 搜索和 List RSS 的全局重试：所有实例失败后按此延迟重试，全部实例冷却时延迟为该值的两倍。
 - 一次定时检查或一次手动 `/推文` 期间，若某 RSS 镜像出现 429/可重试失败，本轮后续账号跳过该 host；检查结束即丢弃（不写盘、不跨 tick）。
 - HTML 搜索使用统一服务内的 host 冷却（30s 起、封顶 5min），并已加线程锁。
 
