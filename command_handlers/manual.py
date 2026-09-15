@@ -657,6 +657,14 @@ class ManualCommandMixin:
         progress_index: int = 0,
         progress_total: int = 0,
     ) -> None:
+        # Skip per-tweet AI log when translation is off — the
+        # "translation=off" line adds no value and clutters the log
+        # for every tweet in the batch.
+        has_translation = translation_report is not None and getattr(
+            translation_report, "tweet_results", None
+        )
+        if not has_translation:
+            return
         total = progress_total or len(tweets)
         start = progress_index or 1
         for offset, tweet in enumerate(tweets):
