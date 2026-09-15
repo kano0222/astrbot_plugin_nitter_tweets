@@ -1136,6 +1136,50 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(nitter_no_repost.path_overrides, [""])
 
+    async def test_blogger_merged_skipped_when_repost_filter_off(self):
+        """When filter_reposts is off, the merged RSS path must be skipped
+        because author-based splitting drops retweets of outside accounts.
+        Per-user requests are used instead so retweets are preserved.
+        """
+        tweet_a = self._make_tweet("alice", "100")
+        tweet_b = self._make_tweet("bob", "200")
+
+        class _MergedAwareNitter(_SchedulerNitter):
+            def __init__(self, scans):
+                super().__init__(scans)
+                self.merged_called = False
+
+            async def fetch_merged_for_scheduler(self, *a, **kw):
+                self.merged_called = True
+                raise AssertionError("merged path should be skipped")
+
+        config = {
+            "filter_reposts_enabled": False,
+            "tweet_groups": [
+                {
+                    "name": "博主",
+                    "group_id": "b1",
+                    "group_type": "blogger",
+                    "watch_users": ["alice", "bob"],
+                    "push_targets": [],
+                    "filter_reposts_enabled": False,
+                }
+            ],
+        }
+        nitter = _MergedAwareNitter(
+            {
+                "alice": [{"tweets": [tweet_a], "scanned_status_ids": ["100"]}],
+                "bob": [{"tweets": [tweet_b], "scanned_status_ids": ["200"]}],
+            }
+        )
+        scheduler = self._create_scheduler(config, nitter=nitter)
+        group = scheduler._schedule_groups(log_invalid_targets=False)[0]
+        results = await scheduler._fetch_group_users(group, 20, False, {})
+
+        self.assertFalse(nitter.merged_called)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(nitter.calls, [("alice", None), ("bob", None)])
+
     def test_all_targets_delivered_rejects_empty_target_list(self):
         batch = scheduler_module.PendingTweetBatch(
             username="NASA",

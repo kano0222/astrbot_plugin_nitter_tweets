@@ -57,11 +57,11 @@ AstrBot 插件 `astrbot_plugin_nitter_tweets`：Nitter RSS / HTML 搜索获取�
 - `group_type`：`blogger` | `tag` | **`list`**。创建后勿改；字段分别用 `watch_users` / `watch_queries` / **`watch_lists`**，勿混用。
 - seen：`group_id + account_key`；博主=用户名；标签=`q:<casefold>`；List=`list:<id>`（用 `normalize_seen_account_key`）。
 - 转发过滤：`全局 filter_reposts_enabled && 分组 filter_reposts_enabled`；手动命令不读分组子开关。
-- List 必须 Public；ID 为纯数字；走统一 `instances` HTML。
+- List 必须 Public；ID 为纯数字；走统一 `instances`（RSS 优先，失败回退 HTML）。
 
 ### 自建实例
 
-- `instances`：唯一 Nitter 列表，同时用于博主 RSS/HTML、搜索、List 和后台并发抓取。
+- `instances`：唯一 Nitter 列表，同时用于博主 RSS、List RSS、搜索/HTML 后备和后台并发抓取。
 - Blogger 固定 RSS 优先、HTML 自动后备；无 `user_html_fallback` 开关。
 - `search_instances` / `blogger_html_instances` / `concurrent_fetch_instances` 已删除，只做启动诊断，不读取、不迁移、不写回。
 - 无公共默认实例；已退役公共地址只在运行时过滤并记录 warning。

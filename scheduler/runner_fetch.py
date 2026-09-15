@@ -72,7 +72,15 @@ class SchedulerFetchMixin:
         ):
             # Blogger serial path: try merged RSS to collapse N requests into
             # ceil(N/batch) requests, fall back to per-user on failure.
-            if group.is_blogger_group and len(accounts) > 1:
+            # Skip merged when the user wants to keep retweets: the merged
+            # feed's author-based splitting drops retweets of outside accounts
+            # regardless of filter_reposts, so per-user RSS is required to
+            # preserve them.
+            if (
+                group.is_blogger_group
+                and len(accounts) > 1
+                and self._effective_filter_reposts(group)
+            ):
                 return await self._fetch_group_users_merged(
                     group,
                     accounts,

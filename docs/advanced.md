@@ -275,7 +275,7 @@ HTML 简略规则（`[NitterTweets][html]`，由 `QuietHtmlLog` 实现）：
 - 展示时间统一为 **Asia/Shanghai（UTC+8）** `YYYY-MM-DD HH:MM:SS`（RSS、链接解析、HTML 搜索、List RSS、渲染兜底）。
 - 同会话同 status 约 60 秒防抖（成功发送后记录）；单条消息最多 3 个不同链接。
 
-- 首次启用某个订阅源时，会初始化当前扫描到的 seen ID 和独立扫描基准组，不推送历史内容；Tag/List 首轮边界见”Tag 搜索与 List 分组调度”。
+- 首次启用某个订阅源时，会初始化当前扫描到的 seen ID 和独立扫描基准组，不推送历史内容；Tag/List 首轮边界见「Tag 搜索与 List 分组调度」。
 - `check_on_startup=true` 时，存储迁移完成后会先按分组串行执行一次首检，再进入间隔/每日槽位轮询；首检日志始终包含分组、类型、订阅源数、目标数、触发原因、结果统计和耗时。缺少订阅源或目标的启用分组只记录明确跳过原因。
 - 后台检查保存上一轮首屏最多 20 个精确基准 ID，并用最近 300 条 seen ID 做逐条去重。当前首屏未命中基准组中的任意 ID 时才按 `Min-Id` 继续翻页；命中基准前所有未 seen 推文都在本轮发送，命中位置及其后的旧内容不参与比较。Tag/List 在页数用尽仍未命中旧基准时，按 `max_tweets_per_check` 处理并在安全条件满足后自动用当前第一页基准重建；发送准备失败、基准无效或基准写入失败时保留旧水位，发送调用失败则按本轮跳过并推进 seen。
 - 旧版顶层 `watch_users`、`push_targets` 和分组相关定时配置会自动迁移到 `default` 默认分组；`tweet_groups` 中的各推送分组会独立运行，并拥有独立的推送记录。
@@ -341,11 +341,11 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 
 ### 分组类型
 
-- `group_type: blogger`：只使用 `watch_users`；走 `instances` RSS，RSS 失败或无结果时自动尝试同一列表的 HTML 用户页。**多博主分组会自动使用合并 RSS**（`/{user1,user2,...}/rss`）将多次请求压缩为按字符长度自动分批的少数几批，合并流以批次中水位最低（最旧）的博主为扫描边界，确保所有博主的新推文都被完整捕获；合并失败自动回退逐个请求。
+- `group_type: blogger`：只使用 `watch_users`；走 `instances` RSS，RSS 失败或无结果时自动尝试同一列表的 HTML 用户页。**多博主分组在转发过滤开启时会自动使用合并 RSS**（`/{user1,user2,...}/rss`）将多次请求压缩为按字符长度自动分批的少数几批，合并流以批次中水位最低（最旧）的博主为扫描边界，确保所有博主的新推文都被完整捕获；合并失败自动回退逐个请求。转发过滤关闭时跳过合并流改走逐个请求——合并流按作者拆分会丢弃批次外作者的转推，不支持保留转推。
 - `group_type: tag`：只使用 `watch_queries`，通过 `instances` 的 HTML 搜索；seen 订阅源键为 `q:<casefold query>`。
 - `group_type: list`：只使用 `watch_lists`，优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次返回约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）；RSS 失败或无结果时自动回退 HTML 翻页。seen 订阅源键为 `list:<id>`。List 不新增手动查询命令，继续使用 Dashboard 或配置管理。**创建时间较短的 List 需要过段时间才会被 Nitter 搜索到**，首轮空结果不一定是配置错误。
 - 创建后类型不可改（WebUI 锁定）；不要在同一分组混用 `watch_users`、`watch_queries` 与 `watch_lists`。
-- Tag/List 首轮真正没有可用结果时不初始化 seen 或扫描水位；若有原始结果但全部被纯转推、纯文本或”仅媒体”策略过滤，则记录空扫描水位。
+- Tag/List 首轮真正没有可用结果时不初始化 seen 或扫描水位；若有原始结果但全部被纯转推、纯文本或「仅媒体」策略过滤，则记录空扫描水位。
 - 管理命令：`/标签导入`、`/标签删除`；与 `/订阅导入`、`/订阅删除` 按类型互斥。
 
 ### 查询规则（配置怎么写）
