@@ -421,15 +421,22 @@ class ManualCommandMixin:
                     text = text[len(prefix) :].strip()
                     break
 
-        # Extract optional sort keyword (top / 热门) from anywhere in the text.
+        # Extract optional sort keyword. Only match "top" / "热门" as a
+        # trailing standalone word (after optional limit extraction) to avoid
+        # breaking queries like "top gear" or "toproad".
         sort = ""
-        for token in ("top", "热门", "TOP", "Top"):
-            if token in text:
-                text = text.replace(token, "", 1).strip()
-                # Collapse double spaces left behind.
-                text = re.sub(r"\s+", " ", text).strip()
-                sort = "top"
-                break
+
+        def _strip_trailing_sort(s: str) -> str:
+            m = re.search(r"\s+(?:top|热门)\s*$", s, re.IGNORECASE)
+            if m:
+                return s[: m.start()].strip()
+            return s
+
+        # Pass 1: check original text for trailing sort keyword (e.g. "纳西妲 热门").
+        stripped = _strip_trailing_sort(text)
+        if stripped != text:
+            text = stripped
+            sort = "top"
 
         if not text:
             return (
@@ -449,6 +456,15 @@ class ManualCommandMixin:
         if len(parts) == 2 and parts[1].isdigit():
             query = parts[0].strip()
             limit = int(parts[1])
+
+        # Pass 2: after limit extraction, check again (e.g. "纳西妲 top 5" →
+        # limit=5, query="纳西妲 top" → strip trailing "top").
+        if not sort:
+            stripped = _strip_trailing_sort(query)
+            if stripped != query:
+                query = stripped
+                sort = "top"
+
         max_limit = int(getattr(self, "search_max_limit", 10))
         if limit < 1:
             return "", 0, "", "数量至少为 1。"

@@ -88,6 +88,61 @@ def test_manual_search_reports_query_length_before_network_call():
     assert str(MAX_QUERY_LENGTH) in error
 
 
+def test_parse_search_args_top_keyword_extracts_sort():
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "纳西妲 top 5",
+    )
+    assert query == "纳西妲"
+    assert limit == 5
+    assert sort == "top"
+    assert not error
+
+
+def test_parse_search_args_hot_keyword_extracts_sort():
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "纳西妲 热门",
+    )
+    assert query == "纳西妲"
+    assert sort == "top"
+    assert not error
+
+
+def test_parse_search_args_top_in_query_not_stripped():
+    """'top' inside a query word like 'toproad' must not be stripped."""
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "toproad 5",
+    )
+    assert query == "toproad"
+    assert sort == ""
+    assert not error
+
+
+def test_parse_search_args_top_gear_not_stripped():
+    """'top gear' as a multi-word query must not lose 'top'."""
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+    query, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        "top gear 5",
+    )
+    assert query == "top gear"
+    assert sort == ""
+    assert not error
+
+
 def test_web_probe_reports_query_length_before_backend_call():
     plugin = MagicMock()
     plugin.config = {}
