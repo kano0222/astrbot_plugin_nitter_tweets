@@ -79,7 +79,7 @@ def test_manual_search_reports_query_length_before_network_call():
     host = ManualCommandMixin()
     host.default_limit = 5
     host.search_max_limit = 10
-    query, limit, error = host._parse_search_args(
+    query, limit, _sort, error = host._parse_search_args(
         SimpleNamespace(get_message_str=lambda: ""),
         "x" * (MAX_QUERY_LENGTH + 1),
     )

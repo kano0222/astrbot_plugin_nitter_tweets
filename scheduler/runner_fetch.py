@@ -150,6 +150,7 @@ class SchedulerFetchMixin:
                     batch_watermarks,
                     skip_plain_text=skip_plain_text,
                     filter_reposts=filter_reposts,
+                    media=skip_plain_text,
                 )
             except Exception as exc:
                 logger.warning(
@@ -250,6 +251,9 @@ class SchedulerFetchMixin:
                 filter_reposts=filter_reposts,
             )
         try:
+            # When filter_plain_text is on, switch to /<user>/media/rss for
+            # server-side media-only feed (64-100 pure media tweets per page).
+            media_path = f"{username}/media" if skip_plain_text else ""
             scheduler_method = (
                 "fetch_tweets_for_scheduler_from_instances"
                 if concurrent
@@ -266,6 +270,7 @@ class SchedulerFetchMixin:
                         skip_plain_text=skip_plain_text,
                         retry_attempts=getattr(self.nitter, "retry_attempts", 2),
                         filter_reposts=filter_reposts,
+                        path_override=media_path,
                     )
                 else:
                     instance, scan_result = await fetch_for_scheduler(
@@ -273,6 +278,7 @@ class SchedulerFetchMixin:
                         scan_watermark,
                         skip_plain_text=skip_plain_text,
                         filter_reposts=filter_reposts,
+                        path_override=media_path,
                     )
                 raw_anchor_status_ids = getattr(scan_result, "anchor_status_ids", None)
                 anchor_status_ids = (
@@ -457,15 +463,23 @@ class SchedulerFetchMixin:
         )
 
         try:
+            # When filter_plain_text is on, append filter:media for server-side
+            # filtering so Nitter returns only media-carrying tweets.
+            effective_query = query_item.query
+            if skip_plain_text and "filter:media" not in effective_query:
+                effective_query = f"{effective_query} filter:media"
             search_kwargs = {
                 "kind": query_item.type,
                 "filter_reposts": filter_reposts,
+                # Background tag scanning must always use f=tweets (time order)
+                # for correct incremental seen/watermark logic; never f=top.
+                "sort": "latest",
             }
             if scan_watermark is not None:
                 search_kwargs["anchor_ids"] = scan_watermark
             instance, tweets = await asyncio.to_thread(
                 lambda: self.nitter.search(
-                    query_item.query,
+                    effective_query,
                     fetch_limit,
                     **search_kwargs,
                 )

@@ -455,6 +455,8 @@ class NitterClient:
         anchor_ids: list[str] | None,
         skip_plain_text: bool = False,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> tuple[str, SchedulerFetchResult]:
         return await self._fetch_tweets_for_scheduler_from_instances(
             username,
@@ -463,6 +465,7 @@ class NitterClient:
             skip_plain_text=skip_plain_text,
             retry_attempts=self.retry_attempts,
             filter_reposts=filter_reposts,
+            path_override=path_override,
         )
 
     async def fetch_tweets_for_scheduler_from_instances(
@@ -1261,6 +1264,7 @@ class NitterClient:
         *,
         skip_plain_text: bool = False,
         filter_reposts: bool | None = None,
+        media: bool = False,
     ) -> tuple[str, dict[str, "SchedulerFetchResult"]]:
         """Fetch multiple bloggers via one merged RSS request chain.
 
@@ -1279,6 +1283,8 @@ class NitterClient:
             raise ValueError("no usernames for merged fetch")
 
         merged_path = ",".join(usernames)
+        if media:
+            merged_path = f"{merged_path}/media"
 
         # Merge boundary IDs from all users' watermarks into one set.
         boundary_ids: list[str] = []

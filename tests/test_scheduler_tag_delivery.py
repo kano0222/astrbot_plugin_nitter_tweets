@@ -45,11 +45,15 @@ class _HtmlBackend:
         kind: str | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        **kwargs,
     ):
+        # Strip filter:media suffix appended by skip_plain_text cloud optimization
+        # so test fixtures keyed by the original query still match.
+        lookup_query = query.replace(" filter:media", "").strip()
         self.calls.append((query, limit, kind))
         self.filter_reposts_calls.append(filter_reposts)
         self.anchor_ids_calls.append(None if anchor_ids is None else list(anchor_ids))
-        queue = self.responses_by_query.setdefault(query, [("", [])])
+        queue = self.responses_by_query.setdefault(lookup_query, [("", [])])
         if len(queue) > 1:
             item = queue.pop(0)
         else:
@@ -73,6 +77,7 @@ class _StatsHtmlBackend(_HtmlBackend):
         kind: str | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        **kwargs,
     ):
         instance, tweets = super().search(
             query,

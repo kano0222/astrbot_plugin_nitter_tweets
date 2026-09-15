@@ -2,17 +2,22 @@
 
 所有重要变更都会记录在这里。
 
-## [1.5.0] - 2026-09-14
+## [1.5.0] - 2026-09-15
 
 ### Added
 
-- 新增 `search_sort` 配置项（`basic` 组，默认 `latest`）：控制 HTML 搜索的排序方式。`latest` 对应 `f=tweets`（时间序，当前行为），`top` 对应 `f=top`（推特综合算法流/热门排序）。影响手动搜索和标签分组后台搜索；博主 RSS 订阅不受影响。
+- 新增 `search_sort` 配置项（`basic` 组，默认 `latest`）：控制 HTML 搜索的排序方式。`latest` 对应 `f=tweets`（时间序，当前行为），`top` 对应 `f=top`（推特综合算法流/热门排序）。手动搜索可用 `热门`/`top` 关键词单次覆盖全局默认值（如 `/推文搜索 纳西妲 top 5`）。
+- 新增 `/推文搜图` 命令（alias `tweetpic`、`搜推图`）：只搜带图片/视频的推文。底层自动拼接 `filter:media`（推特云端过滤）+ 本地 `if tweet.media` 兜底。正文照常显示，受翻译和媒体大小限制控制；同样支持 `热门`/`top` 关键词。
 - 博主分组后台检查新增合并 RSS 管道：多博主分组自动使用 `/{user1,user2,...}/rss` 合并请求，按 URL 路径段字符长度自动分批（安全阈值 250 字符，对齐实测 ~280 死线），将 N 次 RSS 请求压缩为少数几批。合并失败自动回退逐个请求；合并流中无推文的博主也会回退逐个请求。合并流每条推文自带作者，按作者拆分后 seen/水位逻辑不变。
 - 文档新增「高级搜索语法」节：说明 `min_faves:`、`min_retweets:`、`min_replies:`、布尔 `OR`/`NOT`、`from:` 多博主聚合等推特高级检索操作符的写法和限制（本地截断 200 字符）。
 
 ### Changed
 
 - List 分组后台检查从 HTML 翻页（`/i/lists/<id>`，单页 20 条）改为 RSS 优先（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）；RSS 失败或无结果时自动回退 HTML 翻页。seen key `list:<id>` 和 `SchedulerFetchResult` 结构不变。
+- `filter_plain_text_enabled` 云端优化：开启后，tag 分组搜索自动追加 `filter:media`（推特云端过滤），blogger 分组 RSS 自动切换为 `/{user}/media/rss` 相册专线（含合并流 `/{user1,user2}/media/rss`），list 分组维持本地过滤（无 `/media/rss` 端点）。请求量大幅降低。
+- 后台 Tag 扫描强制 `f=tweets`（时间序），不受全局 `search_sort=top` 影响，保证增量 seen/水位逻辑正确。
+- 手动搜索 session buffer 的 query_key 纳入 sort，`latest` 和 `top` 模式的缓存互不串台。
+- 手动合并转发传输梯度排序修复：PATH 失败后先走无损的 BASE64/URL 重试（`_retry_forward_with_transport`），仍失败才走有损的去视频降级。此前顺序反了，导致 AstrBot 与 NapCat 分容器时本地文件读不到直接丢视频，跳过了可用的 BASE64 内联和 URL 直链兜底。
 
 ## [1.4.0] - 2026-09-05
 

@@ -44,7 +44,7 @@ def test_search_rotates_to_next_host_on_failure():
     )
     tried: list[str] = []
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         tried.append(base)
         if "a.example" in base:
             raise RuntimeError("a down")
@@ -73,7 +73,7 @@ def test_search_prefers_higher_success_score():
     pool.scores.record_success("https://c.example")
     starts: list[str] = []
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         starts.append(base)
         return [_tweet("9")]
 
@@ -92,7 +92,7 @@ def test_search_tries_cooling_host_after_ready_fail():
     pool.limiter.is_cooling = MagicMock(side_effect=is_cooling)
     tried: list[str] = []
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         tried.append(base)
         if "ready" in base:
             raise RuntimeError("ready failed")
@@ -110,7 +110,7 @@ def test_search_explicit_instance_does_not_rotate_pool():
     pool = _pool(["https://a.example", "https://b.example"])
     tried: list[str] = []
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         tried.append(base)
         raise RuntimeError("only this host")
 
@@ -133,7 +133,7 @@ def test_search_all_hosts_empty_returns_empty_not_raise():
     pool = _pool(["https://a.example", "https://b.example"])
     tried: list[str] = []
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         tried.append(base)
         return []
 
@@ -148,7 +148,7 @@ def test_search_all_hosts_empty_returns_empty_not_raise():
 def test_search_empty_result_reports_mixed_host_attempts():
     pool = _pool(["https://a.example", "https://b.example"])
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         del query, limit, kind, max_pages
         if "a.example" in base:
             raise RuntimeError("a.example HTTP 403")
@@ -165,7 +165,7 @@ def test_search_empty_result_preserves_rt_filter_statistics():
 
     pool = _pool(["https://a.example", "https://b.example"])
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         del base, query, limit, kind, max_pages
         return HtmlSearchResult([], raw_item_count=3, retweet_filtered=3)
 
@@ -179,7 +179,7 @@ def test_search_empty_result_preserves_rt_filter_statistics():
 def test_search_empty_then_hit_uses_later_host():
     pool = _pool(["https://empty.example", "https://hit.example"])
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         if "empty" in base:
             return []
         return [_tweet("42")]
@@ -193,7 +193,7 @@ def test_search_empty_then_hit_uses_later_host():
 def test_search_all_hosts_error_still_raises():
     pool = _pool(["https://a.example", "https://b.example"])
 
-    def paginate(base, query, limit, *, kind, max_pages=None):
+    def paginate(base, query, limit, *, kind, max_pages=None, **kwargs):
         raise RuntimeError(f"down {base}")
 
     pool._paginate_search = paginate  # type: ignore[method-assign]

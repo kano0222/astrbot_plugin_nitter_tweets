@@ -310,6 +310,7 @@ class _SchedulerNitter:
         watermark,
         skip_plain_text=False,
         filter_reposts=None,
+        **kwargs,
     ):
         del skip_plain_text
         self.filter_reposts_calls.append(filter_reposts)

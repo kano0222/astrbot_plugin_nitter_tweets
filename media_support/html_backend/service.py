@@ -125,6 +125,7 @@ class HtmlNitterService:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[str, HtmlSearchResult]:
         q = normalize_query(query)
         resolved = kind or query_kind(q)
@@ -136,6 +137,7 @@ class HtmlNitterService:
             max_pages=max_pages,
             filter_reposts=filter_reposts,
             anchor_ids=anchor_ids,
+            sort=sort,
         )
 
     def fetch_list(

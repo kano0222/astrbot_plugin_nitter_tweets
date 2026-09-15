@@ -381,6 +381,7 @@ class HtmlNitterPool:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[str, HtmlSearchResult]:
         """Search with global retry on total failure."""
         # Skip global retry when targeting a specific instance (probe mode)
@@ -392,6 +393,7 @@ class HtmlNitterPool:
                 instance=instance,
                 max_pages=max_pages,
                 anchor_ids=anchor_ids,
+                sort=sort,
                 **self._repost_filter_kwargs(filter_reposts),
             )
 
@@ -405,6 +407,7 @@ class HtmlNitterPool:
                     instance=instance,
                     max_pages=max_pages,
                     anchor_ids=anchor_ids,
+                    sort=sort,
                     **self._repost_filter_kwargs(filter_reposts),
                 )
             except RuntimeError as exc:
@@ -445,6 +448,7 @@ class HtmlNitterPool:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[str, HtmlSearchResult]:
         q = normalize_query(query)
         if not q:
@@ -481,6 +485,7 @@ class HtmlNitterPool:
                         limit,
                         kind=resolved,
                         max_pages=max_pages,
+                        sort=sort,
                         **(
                             {"anchor_ids": anchor_ids} if anchor_ids is not None else {}
                         ),
@@ -832,6 +837,7 @@ class HtmlNitterPool:
         max_pages: int | None = None,
         filter_reposts: bool | None = None,
         anchor_ids: list[str] | None = None,
+        sort: str | None = None,
     ) -> HtmlSearchResult:
         initial_scan = not anchor_ids
         boundary_ids = {
@@ -851,8 +857,9 @@ class HtmlNitterPool:
         pages = self.config.max_pages if max_pages is None else max_pages
         page_count = self._page_count(pages)
         for page_i in range(page_count):
+            effective_sort = sort if sort is not None else self.config.search_sort
             params = {
-                "f": "top" if self.config.search_sort == "top" else "tweets",
+                "f": "top" if effective_sort == "top" else "tweets",
                 "q": query,
             }
             if cursor:

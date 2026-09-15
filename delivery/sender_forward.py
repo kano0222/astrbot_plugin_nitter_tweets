@@ -118,37 +118,7 @@ class SenderForwardMixin:
                 return True
             logger.warning(f"[NitterTweets] 发送合并转发节点失败: {exc}")
 
-        # 去掉视频后重试
-        if not media_only and any(
-            m.is_video for t in tweets for m in t.media if m.path
-        ):
-            try:
-                nodes_nv = self.renderer.build_nodes(
-                    event,
-                    username,
-                    instance,
-                    tweets,
-                    exclude_videos=True,
-                    notices=notices,
-                    start_index=tweet_start_index,
-                    media_only=media_only,
-                    omit_status_url=omit_status_url,
-                    hide_original_when_translated=hide_original_when_translated,
-                    link_style=link_style,
-                )
-                await event.send(event.chain_result([nodes_nv]))
-                logger.info("[NitterTweets] 初次失败后已发送去除视频的合并转发")
-                self._notify_delivered(on_delivered, len(tweets))
-                return True
-            except Exception as exc:
-                if self._is_uncertain_delivery_error(exc):
-                    self._log_uncertain_delivery(
-                        "manual tweets without videos", self._event_target(event), exc
-                    )
-                    self._notify_delivered(on_delivered, len(tweets))
-                    return True
-                logger.warning(f"[NitterTweets] 发送去除视频的合并转发节点失败: {exc}")
-
+        # OneBot raw forward (PATH encoding, before transport gradient).
         last_exc: Exception | None = None
         try:
             if await self._send_onebot_forward(event, raw_nodes):
@@ -174,7 +144,7 @@ class SenderForwardMixin:
             last_exc
         )
 
-        # 传输编码降级是无损的，必须排在拆分/去视频之前。payload 被拒是体积问题，
+        # 传输编码降级是无损的，必须排在去视频降级之前。payload 被拒是体积问题，
         # `_retry_forward_with_transport` 自己会跳过那种情况。
         if not should_split:
 
@@ -214,6 +184,63 @@ class SenderForwardMixin:
             ):
                 self._notify_delivered(on_delivered, len(tweets))
                 return True
+
+        # 有损降级：去视频重试（排在无损传输梯度之后）
+        if not media_only and any(
+            m.is_video for t in tweets for m in t.media if m.path
+        ):
+            raw_nodes_nv = self.renderer.build_onebot_nodes(
+                event,
+                username,
+                instance,
+                tweets,
+                exclude_videos=True,
+                notices=notices,
+                start_index=tweet_start_index,
+                media_only=media_only,
+                omit_status_url=omit_status_url,
+                hide_original_when_translated=hide_original_when_translated,
+                link_style=link_style,
+            )
+            try:
+                if await self._send_onebot_forward(event, raw_nodes_nv):
+                    logger.info("[NitterTweets] 初次失败后已发送去除视频的合并转发")
+                    self._notify_delivered(on_delivered, len(tweets))
+                    return True
+            except Exception as exc:
+                if self._is_uncertain_delivery_error(exc):
+                    self._log_uncertain_delivery(
+                        "manual tweets without videos", self._event_target(event), exc
+                    )
+                    self._notify_delivered(on_delivered, len(tweets))
+                    return True
+                logger.warning(f"[NitterTweets] 发送去除视频的合并转发节点失败: {exc}")
+            try:
+                nodes_nv = self.renderer.build_nodes(
+                    event,
+                    username,
+                    instance,
+                    tweets,
+                    exclude_videos=True,
+                    notices=notices,
+                    start_index=tweet_start_index,
+                    media_only=media_only,
+                    omit_status_url=omit_status_url,
+                    hide_original_when_translated=hide_original_when_translated,
+                    link_style=link_style,
+                )
+                await event.send(event.chain_result([nodes_nv]))
+                logger.info("[NitterTweets] 初次失败后已发送去除视频的合并转发")
+                self._notify_delivered(on_delivered, len(tweets))
+                return True
+            except Exception as exc:
+                if self._is_uncertain_delivery_error(exc):
+                    self._log_uncertain_delivery(
+                        "manual tweets without videos", self._event_target(event), exc
+                    )
+                    self._notify_delivered(on_delivered, len(tweets))
+                    return True
+                logger.warning(f"[NitterTweets] 发送去除视频的合并转发节点失败: {exc}")
 
         remaining = tweets
         remaining_index = tweet_start_index

@@ -188,14 +188,31 @@ class ManualCommandMixin:
             started=started,
         )
 
-    async def _cmd_tweet_search_impl(self, event: AstrMessageEvent, args=GreedyStr):
-        """HTML 搜索公开推文：标签请带 #，短语直接写。"""
+    async def _cmd_tweet_search_impl(
+        self,
+        event: AstrMessageEvent,
+        args=GreedyStr,
+        *,
+        is_media_search: bool = False,
+    ):
+        """HTML 搜索公开推文：标签请带 #，短语直接写。
+
+        ``is_media_search=True`` 时自动追加 ``filter:media`` 并本地兜底过滤。
+        """
         event.stop_event()
 
-        query, limit, error = self._parse_search_args(event, args)
+        extra_prefixes = ("推文搜图", "tweetpic", "搜推图") if is_media_search else ()
+        query, limit, sort, error = self._parse_search_args(
+            event, args, extra_prefixes=extra_prefixes
+        )
         if error:
             await event.send(event.plain_result(error))
             return
+
+        # Append filter:media for media-only search (server-side, best effort).
+        effective_query = query
+        if is_media_search and "filter:media" not in effective_query:
+            effective_query = f"{effective_query} filter:media"
 
         cooldown_left = self._cooldown_left(event, scope="search")
         if cooldown_left > 0:
@@ -208,7 +225,7 @@ class ManualCommandMixin:
 
         session_id = self._search_session_id(event)
         store = self._get_search_session_store()
-        query_key = self._search_query_key(query)
+        query_key = self._search_query_key(effective_query, sort)
         buf = store.get_or_create(session_id, query_key)
 
         sent_progress = [0]
@@ -279,14 +296,18 @@ class ManualCommandMixin:
         try:
             instance, fetched = await asyncio.to_thread(
                 self.nitter.search,
-                query,
+                effective_query,
                 fetch_limit,
                 max_pages=pages,
+                sort=sort or None,
             )
         except TypeError:
             try:
                 instance, fetched = await asyncio.to_thread(
-                    self.nitter.search, query, fetch_limit
+                    self.nitter.search,
+                    effective_query,
+                    fetch_limit,
+                    sort=sort or None,
                 )
             except Exception as exc:
                 logger.warning(f"[NitterTweets] 搜索失败 query={query!r}: {exc}")
@@ -319,9 +340,13 @@ class ManualCommandMixin:
             )
             return
 
-        added = buf.add_tweets(list(fetched or []), instance=instance or "")
+        fetched_list = list(fetched or [])
+        # Local fallback: drop pure-text tweets for media-only search.
+        if is_media_search:
+            fetched_list = [t for t in fetched_list if t.media]
+        added = buf.add_tweets(fetched_list, instance=instance or "")
         logger.info(
-            f"[NitterTweets] search buffer session={session_id!r} query={query!r} "
+            f"[NitterTweets] search buffer session={session_id!r} query={effective_query!r} "
             f"fetched={len(fetched or [])} added={added} pool={len(buf)}"
         )
 
@@ -370,25 +395,52 @@ class ManualCommandMixin:
             started=search_started,
         )
 
-    def _parse_search_args(self, event: AstrMessageEvent, args=GreedyStr):
+    def _parse_search_args(
+        self,
+        event: AstrMessageEvent,
+        args=GreedyStr,
+        *,
+        extra_prefixes: tuple[str, ...] = (),
+    ):
         text = ""
         if args is not None and str(args).strip():
             text = str(args).strip()
         else:
             text = (event.get_message_str() or "").strip()
             # strip command token
-            for prefix in ("/推文搜索", "推文搜索", "/tweetsearch", "tweetsearch"):
+            prefixes = (
+                "/推文搜索",
+                "推文搜索",
+                "/tweetsearch",
+                "tweetsearch",
+                *(f"/{p}" for p in extra_prefixes),
+                *extra_prefixes,
+            )
+            for prefix in prefixes:
                 if text.startswith(prefix):
                     text = text[len(prefix) :].strip()
                     break
+
+        # Extract optional sort keyword (top / 热门) from anywhere in the text.
+        sort = ""
+        for token in ("top", "热门", "TOP", "Top"):
+            if token in text:
+                text = text.replace(token, "", 1).strip()
+                # Collapse double spaces left behind.
+                text = re.sub(r"\s+", " ", text).strip()
+                sort = "top"
+                break
+
         if not text:
             return (
                 "",
                 0,
+                "",
                 (
-                    "用法：/推文搜索 <query> [数量]\n"
+                    "用法：/推文搜索 <query> [数量] [热门]\n"
                     "标签请带 #，例如：#圣娅\n"
-                    "普通词/短语直接写：python programming"
+                    "普通词/短语直接写：python programming\n"
+                    "加「热门」或「top」按热度排序"
                 ),
             )
         parts = text.rsplit(None, 1)
@@ -399,13 +451,13 @@ class ManualCommandMixin:
             limit = int(parts[1])
         max_limit = int(getattr(self, "search_max_limit", 10))
         if limit < 1:
-            return "", 0, "数量至少为 1。"
+            return "", 0, "", "数量至少为 1。"
         limit = min(limit, max_limit)
         if not query:
-            return "", 0, "查询内容不能为空。"
+            return "", 0, "", "查询内容不能为空。"
         if len(query) > MAX_QUERY_LENGTH:
-            return "", 0, f"查询内容过长（最多 {MAX_QUERY_LENGTH} 字符）。"
-        return query, limit, ""
+            return "", 0, "", f"查询内容过长（最多 {MAX_QUERY_LENGTH} 字符）。"
+        return query, limit, sort, ""
 
     async def _cmd_mirror_probe_impl(self, event: AstrMessageEvent, args=GreedyStr):
         """用临时自建 Nitter 实例测试用户时间线。"""
@@ -838,7 +890,7 @@ class ManualCommandMixin:
         group = safe_call(event, "get_group_id") or "private"
         return f"{group}:{sender}"
 
-    def _search_query_key(self, query: str) -> str:
+    def _search_query_key(self, query: str, sort: str = "") -> str:
         q = str(query or "").strip()
         try:
             from ..media_support.html_backend.query import normalize_query
@@ -846,11 +898,14 @@ class ManualCommandMixin:
             try:
                 from media_support.html_backend.query import normalize_query
             except ImportError:
-                return q.casefold()
-        try:
-            return normalize_query(q).casefold()
-        except Exception:
-            return q.casefold()
+                base = q.casefold()
+            else:
+                base = normalize_query(q).casefold()
+        else:
+            base = normalize_query(q).casefold()
+        # Include sort in the key so latest/top searches don't share a cache.
+        suffix = f"\0{sort}" if sort and sort != "latest" else ""
+        return f"{base}{suffix}"
 
     def _get_search_session_store(self):
         store = getattr(self, "_search_session_store", None)
