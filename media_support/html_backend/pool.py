@@ -494,7 +494,7 @@ class HtmlNitterPool:
                 )
                 if tweets:
                     if attempts:
-                        tweets.host_attempts = [*attempts, f"{host}=成功"]
+                        tweets.host_attempts = [*attempts, f"#{index}=成功"]
                     self.scores.record_success(host)
                     if index > 1:
                         self.log(
@@ -502,7 +502,7 @@ class HtmlNitterPool:
                         )
                     return base, tweets.limited(limit) if not anchor_ids else tweets
                 empty_success_base = base
-                attempts.append(f"{host}=空结果")
+                attempts.append(f"#{index}=空结果")
                 empty_success_result.raw_item_count += tweets.raw_item_count
                 empty_success_result.retweet_filtered += tweets.retweet_filtered
                 empty_success_result.scan_complete = (
@@ -521,7 +521,7 @@ class HtmlNitterPool:
             except Exception as exc:
                 # Failures scored inside _get_html (including transport errors).
                 errors.append(f"{base}: {exc}")
-                attempts.append(f"{host}={_format_host_failure(exc)}")
+                attempts.append(f"#{index}={_format_host_failure(exc)}")
                 self.log(
                     f"search fail host={host}, rotate next ({index}/{total}): {exc}"
                 )
@@ -636,7 +636,7 @@ class HtmlNitterPool:
                 )
                 if tweets:
                     if attempts:
-                        tweets.host_attempts = [*attempts, f"{host}=成功"]
+                        tweets.host_attempts = [*attempts, f"#{index}=成功"]
                     self.scores.record_success(host)
                     if index > 1:
                         self.log(
@@ -647,7 +647,7 @@ class HtmlNitterPool:
                         tweets.limited(limit) if anchor_ids is None else tweets,
                     )
                 empty_success_base = base
-                attempts.append(f"{host}=空结果")
+                attempts.append(f"#{index}=空结果")
                 empty_success_result.raw_item_count += tweets.raw_item_count
                 empty_success_result.retweet_filtered += tweets.retweet_filtered
                 empty_success_result.scan_complete = (
@@ -665,7 +665,7 @@ class HtmlNitterPool:
                 self.log(f"list empty host={host}, rotate next ({index}/{total})")
             except Exception as exc:
                 errors.append(f"{base}: {exc}")
-                attempts.append(f"{host}={_format_host_failure(exc)}")
+                attempts.append(f"#{index}={_format_host_failure(exc)}")
                 self.log(f"list fail host={host}, rotate next ({index}/{total}): {exc}")
 
         if empty_success_base is not None:

@@ -142,7 +142,7 @@ def test_search_all_hosts_empty_returns_empty_not_raise():
     assert tweets == []
     assert base in {"https://a.example", "https://b.example"}
     assert len(tried) == 2
-    assert tweets.host_attempts == ["a.example=空结果", "b.example=空结果"]
+    assert tweets.host_attempts == ["#1=空结果", "#2=空结果"]
 
 
 def test_search_empty_result_reports_mixed_host_attempts():
@@ -157,7 +157,7 @@ def test_search_empty_result_reports_mixed_host_attempts():
     pool._paginate_search = paginate  # type: ignore[method-assign]
     _base, tweets = pool.search("#foo", 20, kind="tag")
 
-    assert tweets.host_attempts == ["a.example=HTTP 403", "b.example=空结果"]
+    assert tweets.host_attempts == ["#1=HTTP 403", "#2=空结果"]
 
 
 def test_search_empty_result_preserves_rt_filter_statistics():
