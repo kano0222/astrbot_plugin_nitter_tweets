@@ -175,7 +175,7 @@ AstrBot 设置界面已按“基础、媒体、AI 翻译、后台检查、推送
 | `send_user_interval` | 该分组多个订阅源之间的发送间隔（秒）；不设置则使用全局 `send_user_interval` 值。Tag/List 查询抓取之间也按该间隔等待。 |
 | `max_tweets_per_check` | 单个订阅源单次检查最多推送的推文条数；`0`（默认）表示不限制，范围 0-200。适用于爆发式更新场景，避免一次推送过多消息。被截断的较旧推文会标记 seen，不会在下轮重新推送；Tag/List 扫描未完整且找不到旧基准时，`0` 会跳过推送并自动重建第一页基准，正数会按上限推送后再重建基准，旧积压可能被跳过。 |
 | `filter_reposts_enabled` | 分组级转发过滤子开关，默认开启；仅在全局同名总开关开启时生效。旧分组缺少该字段时按开启处理。 |
-| `filter_plain_text_enabled` | 是否过滤没有当前作者上传图片、视频或 GIF 的纯文本推文；只影响该分组的后台检查，手动 `/推文`、`/镜像测试` 不受影响。 |
+| `filter_plain_text_enabled` | 是否过滤没有当前作者上传图片、视频或 GIF 的纯文本推文；只影响该分组的后台检查，手动 `/推文`、`/镜像测试` 不受影响。开启后底层自动走云端优化：tag 分组搜索追加 `filter:media`（推特云端过滤），blogger 分组 RSS 切换为 `/{user}/media/rss` 相册专线（含合并流 `/{user1,user2}/media/rss`），list 分组维持本地过滤（无相册端点）。 |
 | `media_only_enabled` | 是否只发送作者和成功准备的图片/视频/GIF；受全局媒体类型开关和 `max_media_per_tweet` 控制。全局媒体不可用时只在 WebUI 和日志提示，并自动回退完整内容。仅媒体有效时：`policy_skipped` 允许扫描基准推进，`transient_failure` / `no_candidate` 下轮重试且不写 seen；手动命令和历史重推不受影响。 |
 
 
@@ -355,7 +355,7 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 - 兼容读取旧的 `{query, type}` 对象，启动/保存时会规范成字符串，避免 AstrBot 配置列表显示成 `[object Object]`。
 - 若配置里已出现字面量 `[object Object]`，该项无效，请删除后重新填写 `#标签` 或短语。
 - 运行时：tag 可回退 `/hashtag/`，phrase 仅 `/search`。
-- 手动：`/推文搜索 <query> [数量]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag/List 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准。
+- 手动：`/推文搜索 <query> [数量] [热门]`，冷却使用 `cooldown_seconds`，默认条数使用 `default_limit`，最大条数仍由 `search_max_limit` 限制。手动搜索为凑满条数最多翻约 3 页；定时 Tag/List 默认按 `html_max_pages=1`，已有水位时会在该范围内寻找旧基准。加「热门」或「top」按热度排序（`f=top`），否则按全局 `search_sort` 配置。`/推文搜图` 用法相同，但自动追加 `filter:media` 只返回带图片/视频的推文，正文照常显示。
 
 ### 高级搜索语法
 
@@ -379,7 +379,7 @@ python scripts\test_video_download.py https://x.com/user/status/123 --resolution
 - 查询字符串本地截断上限为 200 字符；布尔聚合建议 5~10 人，接近上限会被截断。
 - 这些操作符只作用于 HTML 搜索路径（标签分组和手动搜索）。博主 RSS 订阅不受影响。
 - `search_sort` 设为 `top` 时，搜索改用 `f=top`（推特综合算法流/热门排序），设为 `latest`（默认）时使用 `f=tweets`（时间序）。
-- 互动质量过滤（`min_faves` 等）在推特云端完成，不消耗本地资源；`filter_plain_text_enabled` 是本地媒体过滤，两者不冲突。
+- 互动质量过滤（`min_faves` 等）在推特云端完成，不消耗本地资源；`filter_plain_text_enabled` 开启后也走云端优化（tag 追加 `filter:media`、blogger 切 `/media/rss`），两者不冲突。
 
 ### Tag/List 分组定时：获取与发送数量
 
