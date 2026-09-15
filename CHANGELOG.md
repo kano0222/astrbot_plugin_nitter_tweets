@@ -31,6 +31,7 @@
 - 相册专线与转发保留意图冲突：`filter_plain_text_enabled` 开启时无条件切换到 `/{user}/media/rss`，但该端点排除所有转发。当用户想保留转推（`filter_reposts_enabled=false`）时，转推中的图片/视频被云端永久吞掉。改为仅在转发过滤也开启时才切换到相册专线，否则保持主页 RSS 由本地过滤。
 - 合并流不支持保留转推：合并 RSS 按作者拆分时会丢弃批次外作者的转推条目（与 `filter_reposts` 开关无关）。当用户关闭转发过滤（想保留转推）时，自动跳过合并流改走逐个请求，确保转推不被静默丢弃。合并流仅在转发过滤开启时生效。
 - 关闭 AI 翻译时逐条「AI 处理完成」日志仍刷屏（f19d28a 回归）：`has_translation` 检查依赖 `translation_report.tweet_results` 的真值，但 `attach_translations` 在翻译关闭时给每条推文塞 `status="off"` 的非空列表，Python 非空列表永远 truthy，导致拦截从未生效。改为直接查 `self.translator.enabled` 配置真源。
+- List RSS 平静期过度回退 HTML：`fetch_list_for_scheduler` 成功完成但无新推文时（`tweets` 为空），因 `if tweets:` 判定为假而误掉入 HTML 后备路径；改为 `if tweets or scan_result.complete:`，避免平静期每轮对实例造成无谓的 HTML 搜索翻页。
 
 ## [1.4.0] - 2026-09-05
 

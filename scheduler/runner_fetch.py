@@ -589,7 +589,7 @@ class SchedulerFetchMixin:
                 )
             )
             tweets = list(scan_result.tweets)
-            if tweets:
+            if tweets or scan_result.complete:
                 self._log_verbose_info(
                     f"[NitterTweets] List RSS 抓取成功: group={group.group_id}, "
                     f"source={source_label}, instance={instance}, "
