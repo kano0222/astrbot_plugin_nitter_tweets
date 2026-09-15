@@ -303,6 +303,7 @@ class _SchedulerNitter:
         }
         self.calls = []
         self.filter_reposts_calls = []
+        self.path_overrides = []
 
     async def fetch_tweets_for_scheduler(
         self,
@@ -314,6 +315,7 @@ class _SchedulerNitter:
     ):
         del skip_plain_text
         self.filter_reposts_calls.append(filter_reposts)
+        self.path_overrides.append(kwargs.get("path_override", ""))
         self.calls.append((username, watermark))
         scans = self.scans_by_user[username]
         scan = scans.pop(0) if len(scans) > 1 else scans[0]
@@ -1076,6 +1078,63 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(serial_nitter.filter_reposts_calls, [False])
         self.assertEqual(html_backend.filter_reposts_calls, [False])
         self.assertEqual(concurrent_nitter.filter_reposts_calls, [False])
+
+    async def test_blogger_media_path_only_when_both_plain_text_and_repost_filter_on(
+        self,
+    ):
+        """/<user>/media/rss excludes ALL retweets.  Only switch to it when
+        both skip_plain_text and filter_reposts are active; when the user
+        wants to keep retweets (filter_reposts=False), stay on the regular
+        RSS feed so retweets are not silently dropped.
+        """
+        tweet = self._make_tweet("NASA", "100")
+        scan = [{"tweets": [tweet], "scanned_status_ids": ["100"]}]
+
+        # Case 1: both plain_text and repost filtering on → media path
+        config_both = {
+            "filter_reposts_enabled": True,
+            "tweet_groups": [
+                {
+                    "name": "博主",
+                    "group_id": "b1",
+                    "group_type": "blogger",
+                    "watch_users": ["NASA"],
+                    "push_targets": [],
+                    "filter_reposts_enabled": True,
+                    "filter_plain_text_enabled": True,
+                }
+            ],
+        }
+        nitter_both = _SchedulerNitter({"NASA": scan})
+        sched_both = self._create_scheduler(config_both, nitter=nitter_both)
+        group_both = sched_both._schedule_groups(log_invalid_targets=False)[0]
+        await sched_both._fetch_group_user(
+            group_both, 0, "NASA", 20, True, None, concurrent=False
+        )
+        self.assertEqual(nitter_both.path_overrides, ["NASA/media"])
+
+        # Case 2: plain_text on, repost filter off → regular RSS
+        config_no_repost = {
+            "filter_reposts_enabled": False,
+            "tweet_groups": [
+                {
+                    "name": "博主",
+                    "group_id": "b2",
+                    "group_type": "blogger",
+                    "watch_users": ["NASA"],
+                    "push_targets": [],
+                    "filter_reposts_enabled": False,
+                    "filter_plain_text_enabled": True,
+                }
+            ],
+        }
+        nitter_no_repost = _SchedulerNitter({"NASA": list(scan)})
+        sched_nr = self._create_scheduler(config_no_repost, nitter=nitter_no_repost)
+        group_nr = sched_nr._schedule_groups(log_invalid_targets=False)[0]
+        await sched_nr._fetch_group_user(
+            group_nr, 0, "NASA", 20, True, None, concurrent=False
+        )
+        self.assertEqual(nitter_no_repost.path_overrides, [""])
 
     def test_all_targets_delivered_rejects_empty_target_list(self):
         batch = scheduler_module.PendingTweetBatch(

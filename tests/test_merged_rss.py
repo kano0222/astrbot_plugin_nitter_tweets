@@ -140,7 +140,7 @@ def test_fetch_merged_splits_by_author(monkeypatch):
 
 
 def test_fetch_merged_with_watermark(monkeypatch):
-    """Merged scan with watermarks merges boundary IDs and scans to them."""
+    """Merged scan uses the oldest user's watermark as the boundary."""
     client = _client()
     # First page has tweets, watermark ID is in the page
     tweets_data = [
@@ -198,3 +198,82 @@ def test_fetch_merged_empty_feed(monkeypatch):
     # Both users get empty results
     assert len(results["alice"].tweets) == 0
     assert len(results["bob"].tweets) == 0
+
+
+def test_fetch_merged_boundary_collision(monkeypatch):
+    """Divergent watermarks: scan must reach the OLDEST boundary, not stop
+    at the freshest, so tweets between the two watermarks are not lost.
+
+    Scenario:
+      alice watermark 1005 (active, higher)
+      bob   watermark 1003 (slightly older)
+      bob has a new tweet 1004 that sits BETWEEN the two watermarks in the
+      merged feed.
+
+    With the old union approach the scan would hit 1005 (alice's) first
+    and truncate, silently dropping bob's 1004.  The fix passes only the
+    oldest user's watermark so the scan continues past 1005 to 1003.
+    """
+    client = _client()
+    tweets_data = [
+        ("alice", "1006", "alice new"),
+        ("alice", "1005", "alice watermark"),
+        ("bob", "1004", "bob new between watermarks"),
+        ("bob", "1003", "bob watermark"),
+    ]
+    xml = _rss_xml(tweets_data)
+
+    def fake_urlopen(request, timeout):
+        resp = MagicMock()
+        resp.headers = {"Min-Id": ""}
+        resp.read = MagicMock(return_value=xml)
+        resp.__enter__ = MagicMock(return_value=resp)
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    monkeypatch.setattr("media_support.client.compat_urlopen", fake_urlopen)
+
+    watermarks = {
+        "alice": ["1005"],
+        "bob": ["1003"],
+    }
+
+    instance, results = asyncio.run(
+        client.fetch_merged_for_scheduler(["alice", "bob"], watermarks)
+    )
+
+    # bob's tweet 1004 (between the two watermarks) must NOT be truncated
+    bob_ids = [t.status_id for t in results["bob"].tweets]
+    assert "1004" in bob_ids, f"bob's 1004 was lost: {bob_ids}"
+
+    # alice's new tweet is also captured
+    alice_ids = [t.status_id for t in results["alice"].tweets]
+    assert "1006" in alice_ids
+
+
+def test_fetch_merged_media_flag_appends_media_path(monkeypatch):
+    """When media=True the merged URL gets a /media suffix."""
+    client = _client()
+    xml = _rss_xml([("alice", "100", "alice media tweet")])
+
+    captured_urls: list[str] = []
+
+    def fake_urlopen(request, timeout):
+        captured_urls.append(request.full_url)
+        resp = MagicMock()
+        resp.headers = {"Min-Id": ""}
+        resp.read = MagicMock(return_value=xml)
+        resp.__enter__ = MagicMock(return_value=resp)
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    monkeypatch.setattr("media_support.client.compat_urlopen", fake_urlopen)
+
+    asyncio.run(client.fetch_merged_for_scheduler(["alice", "bob"], {}, media=True))
+    assert any("alice,bob/media/rss" in url for url in captured_urls)
+
+    # Without media flag the path has no /media suffix
+    captured_urls.clear()
+    asyncio.run(client.fetch_merged_for_scheduler(["alice", "bob"], {}, media=False))
+    assert any("alice,bob/rss" in url for url in captured_urls)
+    assert not any("/media/rss" in url for url in captured_urls)

@@ -48,7 +48,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 - `interval_check_enabled`: 是否参与全局间隔检查。
 - `daily_check_times`: 每日检查时间。
 - `filter_reposts_enabled`: 分组级转发过滤子开关，默认 `true`；只有全局同名总开关也开启时才过滤。
-- `filter_plain_text_enabled`: 是否过滤无作者媒体的纯文本推文。博主 RSS 改走 `/{user}/media/rss`；Tag 搜索追加 `filter:media` 服务端过滤并辅以本地兜底；List RSS 仅做本地过滤。手动命令不受影响。
+- `filter_plain_text_enabled`: 是否过滤无作者媒体的纯文本推文。博主 RSS 在转发过滤也开启时改走 `/{user}/media/rss` 相册专线（含合并流），转发过滤关闭时保持主页 RSS 由本地过滤以保留转推；Tag 搜索追加 `filter:media` 服务端过滤并辅以本地兜底；List RSS 仅做本地过滤。手动命令不受影响。
 - `omit_status_url`: 该分组定时发送时去除推文链接（默认 `true`）。开启后不附带原文 URL 明文，并去掉正文/译文中的 http(s)；关闭时普通正文/译文中的外部链接保留，但当前 Nitter 来源实例改写出的同站镜像链接仍会清理。Telegram 在作者头部使用 Markdown 链接到推文，并在底层发送时关闭网页预览。仅媒体模式不调用翻译。
 - `hide_original_when_translated`: 分组级；有译文时隐藏原文（在全局 `show_original_when_translated=true` 时生效）。
 - `media_only_enabled`: 定时推送只发送作者和成功准备的媒体；受全局媒体开关及单条媒体数量上限控制，全局不可用时回退完整内容。

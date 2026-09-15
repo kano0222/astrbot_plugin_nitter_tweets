@@ -150,7 +150,7 @@ class SchedulerFetchMixin:
                     batch_watermarks,
                     skip_plain_text=skip_plain_text,
                     filter_reposts=filter_reposts,
-                    media=skip_plain_text,
+                    media=skip_plain_text and filter_reposts,
                 )
             except Exception as exc:
                 logger.warning(
@@ -251,9 +251,13 @@ class SchedulerFetchMixin:
                 filter_reposts=filter_reposts,
             )
         try:
-            # When filter_plain_text is on, switch to /<user>/media/rss for
-            # server-side media-only feed (64-100 pure media tweets per page).
-            media_path = f"{username}/media" if skip_plain_text else ""
+            # /<user>/media/rss shows only the author's own media uploads
+            # and excludes ALL retweets.  Only switch to it when both
+            # plain-text and repost filtering are active; otherwise keep
+            # the regular RSS feed and filter plain text locally so that
+            # retweets the user wants to keep are not silently dropped.
+            use_media_path = skip_plain_text and filter_reposts
+            media_path = f"{username}/media" if use_media_path else ""
             scheduler_method = (
                 "fetch_tweets_for_scheduler_from_instances"
                 if concurrent

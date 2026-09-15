@@ -1286,21 +1286,40 @@ class NitterClient:
         if media:
             merged_path = f"{merged_path}/media"
 
-        # Merge boundary IDs from all users' watermarks into one set.
-        boundary_ids: list[str] = []
-        seen_sids: set[str] = set()
+        # Use the oldest user's watermark as the scan boundary.
+        #
+        # The scan loop stops at the first boundary ID it encounters in the
+        # feed (newest-first).  If we passed the union of all users'
+        # watermarks, the scan would stop at the freshest user's watermark,
+        # silently truncating new tweets belonging to users with older
+        # watermarks.  By passing only the watermark of the user whose newest
+        # (highest) status ID is the lowest, the scan continues past every
+        # other user's newer watermarks and stops at the oldest boundary —
+        # capturing all new tweets for every user in a single scan.
+        oldest_watermark: list[str] = []
+        oldest_max_val: int | None = None
         has_watermark = False
         for username in usernames:
             watermark = watermarks.get(username)
-            if watermark:
-                has_watermark = True
-                for sid in watermark:
-                    sid_str = str(sid or "").strip()
-                    if sid_str and sid_str not in seen_sids:
-                        boundary_ids.append(sid_str)
-                        seen_sids.add(sid_str)
+            if not watermark:
+                continue
+            has_watermark = True
+            user_max_val: int | None = None
+            for sid in watermark:
+                sid_str = str(sid or "").strip()
+                if sid_str and sid_str.isdigit():
+                    val = int(sid_str)
+                    if user_max_val is None or val > user_max_val:
+                        user_max_val = val
+            if user_max_val is not None and (
+                oldest_max_val is None or user_max_val < oldest_max_val
+            ):
+                oldest_max_val = user_max_val
+                oldest_watermark = [
+                    str(sid).strip() for sid in watermark if str(sid or "").strip()
+                ]
 
-        anchor_ids = boundary_ids if has_watermark else None
+        anchor_ids = oldest_watermark if has_watermark else None
 
         instance, scan_result = await self._fetch_tweets_for_scheduler_from_instances(
             merged_path,  # used only for logging
