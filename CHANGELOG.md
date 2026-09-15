@@ -32,6 +32,10 @@
 - 合并流不支持保留转推：合并 RSS 按作者拆分时会丢弃批次外作者的转推条目（与 `filter_reposts` 开关无关）。当用户关闭转发过滤（想保留转推）时，自动跳过合并流改走逐个请求，确保转推不被静默丢弃。合并流仅在转发过滤开启时生效。
 - 关闭 AI 翻译时逐条「AI 处理完成」日志仍刷屏（f19d28a 回归）：`has_translation` 检查依赖 `translation_report.tweet_results` 的真值，但 `attach_translations` 在翻译关闭时给每条推文塞 `status="off"` 的非空列表，Python 非空列表永远 truthy，导致拦截从未生效。改为直接查 `self.translator.enabled` 配置真源。
 - List RSS 平静期过度回退 HTML：`fetch_list_for_scheduler` 成功完成但无新推文时（`tweets` 为空），因 `if tweets:` 判定为假而误掉入 HTML 后备路径；改为 `if tweets or scan_result.complete:`，避免平静期每轮对实例造成无谓的 HTML 搜索翻页。
+- List RSS 调度抓取异步调用解包错误：`runner_fetch` 中 `fetch_list_for_scheduler` 协程被误包在 `asyncio.to_thread` lambda 内导致未 await 协程解包崩溃（`cannot unpack non-iterable coroutine object`），改为直接 `await` 异步调用，测试改用 `AsyncMock` 覆盖。
+- 并发博主调度检查缺少 `path_override` 参数：并发路径（`concurrent=True`）调用 `fetch_tweets_for_scheduler_from_instances` 时未声明和透传 `path_override`，导致相册专线切换时抛出 `unexpected keyword argument 'path_override'` TypeError，补齐参数声明并透传给私有实现。
+- 手动搜图追加过滤后超长二次校验：`/推文搜图` 在 188-200 字符合法输入后追加 `filter:media` 导致总长超过 200 字符，下游 `normalize_query` 返回空串触发 `ValueError`；在追加后增加二次长度拦截并向用户友好提示。
+- 调度器 RSS 抓取失败警告日志脱敏：合并 RSS 与 List RSS 抓取异常时将错误信息通过 `sanitize_sensitive_text` 脱敏后再写入 warning 日志，防止自建实例内部私有 URL 或敏感凭据泄露。
 
 ## [1.4.0] - 2026-09-05
 

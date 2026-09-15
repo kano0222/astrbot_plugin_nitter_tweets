@@ -213,6 +213,13 @@ class ManualCommandMixin:
         effective_query = query
         if is_media_search and "filter:media" not in effective_query:
             effective_query = f"{effective_query} filter:media"
+            if len(effective_query) > MAX_QUERY_LENGTH:
+                await event.send(
+                    event.plain_result(
+                        f"查询内容过长（加上搜图过滤后最多 {MAX_QUERY_LENGTH} 字符）。"
+                    )
+                )
+                return
 
         cooldown_left = self._cooldown_left(event, scope="search")
         if cooldown_left > 0:

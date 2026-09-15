@@ -23,7 +23,7 @@ Nitter 无法访问需要登录的 Private List，订阅的 List 必须设置为
 
 ### 2. 新建 List 需等待 Nitter 收录
 
-插件优先通过 **Nitter List RSS**（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）拉取时间线，RSS 失败或无结果时自动回退 HTML 翻页；不是直连 X 官方 API。
+插件优先通过 **Nitter List RSS**（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标和 Redis 长缓存）拉取时间线，RSS 发生网络/HTTP 异常或扫描未完成时自动回退 HTML 翻页（扫描完成无新推文时不触发回退）；不是直连 X 官方 API。
 
 **刚创建不久的 List**（创建时间较短）往往要 **过一段时间** 才会被 Nitter 镜像索引到；在此之前可能一直空结果或抓不到。实践中常见要等约 **10–30 分钟**（随镜像与平台波动，非固定 SLA）。空结果时先等再试，不要立刻判定 ID 配错。
 

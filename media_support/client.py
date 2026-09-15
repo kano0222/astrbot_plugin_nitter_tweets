@@ -477,6 +477,8 @@ class NitterClient:
         skip_plain_text: bool = False,
         retry_attempts: int = 3,
         filter_reposts: bool | None = None,
+        *,
+        path_override: str = "",
     ) -> tuple[str, SchedulerFetchResult]:
         """Fetch a complete scheduler scan from an instance pool.
 
@@ -497,6 +499,7 @@ class NitterClient:
             retry_attempts=retry_attempts,
             total_retry_attempts_per_instance=False,
             filter_reposts=filter_reposts,
+            path_override=path_override,
         )
 
     async def fetch_list_for_scheduler(

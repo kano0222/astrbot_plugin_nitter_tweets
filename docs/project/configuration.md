@@ -72,7 +72,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 后台**Tag**检查：每个 `watch_query` 走 `instances` 的 HTML 搜索，组内串行、订阅源之间按 `send_user_interval` 等待。首轮最多取 20 条建立基准；已有水位时本轮扫描可超过 20 条，并按 `html_max_pages` 翻页到旧水位或游标结束，持久化水位仍最多保存 20 个 ID。达到页数上限仍未命中旧基准时，`max_tweets_per_check=0` 会跳过推送并自动重建当前第一页基准，正数会按上限推送后再重建；首屏没有有效状态 ID、发送准备失败或基准写入失败时保留旧水位，发送调用失败则跳过当前批次并推进 seen。按全局和分组双层开关决定是否过滤转发，可选纯文本/仅媒体，再与 seen（`q:...`）差集后发送新帖（`max_tweets_per_check > 0` 时按该上限截断，默认不限制）。首次有可用结果只 init 不推历史；真正空首轮不初始化 seen 或扫描水位；有原始结果但全被过滤时记录空扫描水位。
 
-后台**List**检查：每个 `watch_list` 优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标），按 `Min-Id` 分页到旧水位（同 Blogger RSS）；RSS 失败或无结果时回退 HTML 翻页（同 Tag 的 `html_max_pages` 约束）。其余过滤、纯文本/仅媒体、`max_tweets_per_check` 和首轮初始化行为与 Tag 一致，seen 键为 `list:<id>`。
+后台**List**检查：每个 `watch_list` 优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标），按 `Min-Id` 分页到旧水位（同 Blogger RSS）；RSS 发生网络/HTTP 异常或扫描未完成时回退 HTML 翻页（同 Tag 的 `html_max_pages` 约束），扫描完成无新推文时不触发回退。其余过滤、纯文本/仅媒体、`max_tweets_per_check` 和首轮初始化行为与 Tag 一致，seen 键为 `list:<id>`。
 
 `check_on_startup=true` 时，调度存储初始化完成后按分组顺序首检所有启用且同时配置订阅源和有效推送目标的分组；仅每日定点、仅间隔和没有定时槽位的分组都执行一次。首检完成后锚定当前间隔/每日槽位，避免同一轮重复触发。手动 `/推文检查` 仍要求当前会话属于该分组的 `push_targets`，只是会等待同一套存储初始化完成。
 

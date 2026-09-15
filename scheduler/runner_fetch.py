@@ -13,7 +13,7 @@ from astrbot.api import logger
 try:
     from ..config import config_get, parse_config_bool
     from ..media_support.client import NitterClient
-    from ..shared import TweetItem, format_subscription_source
+    from ..shared import TweetItem, format_subscription_source, sanitize_sensitive_text
     from .config import ScheduleGroup
     from .models import SchedulerTaskError, SourceStatus, UserFetchResult
 except ImportError:
@@ -21,7 +21,7 @@ except ImportError:
     from media_support.client import NitterClient
     from scheduler.config import ScheduleGroup
     from scheduler.models import SchedulerTaskError, SourceStatus, UserFetchResult
-    from shared import TweetItem, format_subscription_source
+    from shared import TweetItem, format_subscription_source, sanitize_sensitive_text
 
 
 def _classify_html_fetch(
@@ -161,10 +161,11 @@ class SchedulerFetchMixin:
                     media=skip_plain_text and filter_reposts,
                 )
             except Exception as exc:
+                error_label = sanitize_sensitive_text(str(exc))
                 logger.warning(
                     f"[NitterTweets] 合并 RSS 抓取失败，回退逐个请求: "
                     f"group={group.group_id}, batch={batch_i + 1}/{len(batches)}, "
-                    f"error={type(exc).__name__}: {exc}"
+                    f"error={type(exc).__name__}: {error_label}"
                 )
                 # Fall back to per-user for the entire batch
                 for username in batch:
@@ -580,13 +581,11 @@ class SchedulerFetchMixin:
         # --- RSS path (primary) ---
         rss_error: Exception | None = None
         try:
-            instance, scan_result = await asyncio.to_thread(
-                lambda: self.nitter.fetch_list_for_scheduler(
-                    list_id,
-                    scan_watermark,
-                    skip_plain_text=skip_plain_text,
-                    filter_reposts=filter_reposts,
-                )
+            instance, scan_result = await self.nitter.fetch_list_for_scheduler(
+                list_id,
+                scan_watermark,
+                skip_plain_text=skip_plain_text,
+                filter_reposts=filter_reposts,
             )
             tweets = list(scan_result.tweets)
             if tweets or scan_result.complete:
@@ -608,10 +607,11 @@ class SchedulerFetchMixin:
                 )
         except Exception as exc:
             rss_error = exc
+            error_label = sanitize_sensitive_text(str(exc))
             logger.warning(
                 f"[NitterTweets] List RSS 抓取失败，尝试 HTML 后备: "
                 f"group={group.group_id}, source={source_label}, "
-                f"error={type(exc).__name__}: {exc}"
+                f"error={type(exc).__name__}: {error_label}"
             )
 
         # --- HTML path (fallback) ---

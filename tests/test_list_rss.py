@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 from media_support.client import NitterClient
@@ -141,7 +141,7 @@ def test_fetch_group_list_empty_tweets_complete_does_not_fallback():
         complete=True,
     )
     runner.nitter = MagicMock()
-    runner.nitter.fetch_list_for_scheduler = MagicMock(
+    runner.nitter.fetch_list_for_scheduler = AsyncMock(
         return_value=("http://nitter:8080", scan_res)
     )
     runner.nitter.fetch_list = MagicMock()
@@ -166,7 +166,7 @@ def test_fetch_group_list_rss_error_falls_back_to_html():
     runner._effective_filter_reposts = MagicMock(return_value=True)
 
     runner.nitter = MagicMock()
-    runner.nitter.fetch_list_for_scheduler = MagicMock(
+    runner.nitter.fetch_list_for_scheduler = AsyncMock(
         side_effect=RuntimeError("RSS failed")
     )
     mock_tweet = MagicMock(status_id="200")
@@ -180,3 +180,76 @@ def test_fetch_group_list_rss_error_falls_back_to_html():
     runner.nitter.fetch_list_for_scheduler.assert_called_once()
     runner.nitter.fetch_list.assert_called_once()
     assert len(res.tweets) == 1
+
+
+def test_fetch_group_list_rss_error_sanitizes_log():
+    """RSS failure warning log must sanitize sensitive text in exception."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from scheduler.runner_fetch import SchedulerFetchMixin
+
+    runner = SchedulerFetchMixin()
+    runner._log_verbose_info = MagicMock()
+    runner._effective_filter_reposts = MagicMock(return_value=True)
+
+    runner.nitter = MagicMock()
+    runner.nitter.fetch_list_for_scheduler = AsyncMock(
+        side_effect=RuntimeError(
+            "connection error to http://admin:pass@internal.net/?token=secret123"
+        )
+    )
+    runner.nitter.fetch_list = MagicMock(return_value=("http://nitter:8080", []))
+
+    group = SimpleNamespace(group_id="g1", group_type="list", is_list_group=True)
+    with patch("scheduler.runner_fetch.logger.warning") as mock_warn:
+        asyncio.run(runner._fetch_group_list(group, 0, "list:12345", 20, ["100"]))
+        mock_warn.assert_called_once()
+        warning_msg = mock_warn.call_args[0][0]
+        assert "pass@" not in warning_msg
+        assert "secret123" not in warning_msg
+        assert "***@" in warning_msg
+
+
+def test_fetch_group_users_merged_rss_error_sanitizes_log():
+    """Merged RSS failure warning log must sanitize sensitive text in exception."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from scheduler.runner_fetch import SchedulerFetchMixin
+
+    runner = SchedulerFetchMixin()
+    runner._log_verbose_info = MagicMock()
+    runner._effective_filter_reposts = MagicMock(return_value=True)
+    runner._fetch_group_user = AsyncMock()
+
+    runner.nitter = MagicMock()
+    runner.nitter.fetch_merged_for_scheduler = AsyncMock(
+        side_effect=RuntimeError(
+            "connection error to http://admin:pass@internal.net/?token=secret123"
+        )
+    )
+
+    group = SimpleNamespace(
+        group_id="g1",
+        group_type="blogger",
+        is_tag_group=False,
+        is_list_group=False,
+        is_blogger_group=True,
+        send_user_interval=0,
+    )
+    with patch("scheduler.runner_fetch.logger.warning") as mock_warn:
+        asyncio.run(
+            runner._fetch_group_users_merged(
+                group,
+                ["user1", "user2"],
+                20,
+                skip_plain_text=False,
+                scan_watermarks={},
+            )
+        )
+        mock_warn.assert_called_once()
+        warning_msg = mock_warn.call_args[0][0]
+        assert "pass@" not in warning_msg
+        assert "secret123" not in warning_msg
+        assert "***@" in warning_msg

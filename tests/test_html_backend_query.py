@@ -349,6 +349,38 @@ def test_search_query_key_latest_gets_suffix():
     assert key_latest != key_top
 
 
+def test_media_search_appended_filter_media_exceeds_max_length():
+    """195-char query passes regular search parse, but when is_media_search=True,
+    appending ' filter:media' (208 chars > 200) is gracefully rejected with a warning.
+    """
+    host = ManualCommandMixin()
+    host.default_limit = 5
+    host.search_max_limit = 10
+
+    raw_query = "x" * 195
+    # In regular search, parsing passes without length error:
+    q, limit, sort, error = host._parse_search_args(
+        SimpleNamespace(get_message_str=lambda: ""),
+        raw_query,
+    )
+    assert error == ""
+    assert q == raw_query
+
+    # In media search via _cmd_tweet_search_impl, appending filter:media causes len > 200
+    # and sends a graceful error message without throwing:
+    event = SimpleNamespace(
+        stop_event=MagicMock(),
+        get_message_str=lambda: "",
+        send=AsyncMock(),
+        plain_result=lambda s: s,
+    )
+    asyncio.run(host._cmd_tweet_search_impl(event, raw_query, is_media_search=True))
+
+    event.send.assert_awaited_once()
+    sent_msg = event.send.call_args[0][0]
+    assert f"加上搜图过滤后最多 {MAX_QUERY_LENGTH} 字符" in sent_msg
+
+
 def test_web_probe_reports_query_length_before_backend_call():
     plugin = MagicMock()
     plugin.config = {}

@@ -2727,3 +2727,88 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.new_tweet_count, 0)
         self.assertEqual(second.pushed_target_attempts, 0)
         self.assertEqual(len(sender.sent), 2)
+
+    async def test_concurrent_fetch_passes_path_override_without_type_error(self):
+        from unittest.mock import AsyncMock
+
+        from media_support.client import NitterClient, SchedulerFetchResult
+        from scheduler.runner_fetch import SchedulerFetchMixin
+
+        client = NitterClient({"instances": ["http://127.0.0.1:8080"]})
+        tweet = self._make_tweet("NASA", "101")
+        expected = (
+            "http://127.0.0.1:8080",
+            SchedulerFetchResult(
+                tweets=[tweet], scanned_status_ids=["101"], complete=True
+            ),
+        )
+
+        with patch.object(
+            client,
+            "_fetch_tweets_for_scheduler_from_instances",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as mock_inner:
+            # 1. Direct call to client.fetch_tweets_for_scheduler_from_instances with path_override
+            result = await client.fetch_tweets_for_scheduler_from_instances(
+                "NASA",
+                ["100"],
+                ["http://127.0.0.1:8080"],
+                start_index=0,
+                skip_plain_text=True,
+                retry_attempts=2,
+                filter_reposts=True,
+                path_override="NASA/media",
+            )
+            self.assertEqual(result, expected)
+            mock_inner.assert_awaited_once_with(
+                "NASA",
+                ["100"],
+                ["http://127.0.0.1:8080"],
+                skip_plain_text=True,
+                retry_attempts=2,
+                total_retry_attempts_per_instance=False,
+                filter_reposts=True,
+                path_override="NASA/media",
+            )
+
+        # 2. Integration call through runner._fetch_group_user with concurrent=True
+        runner = SchedulerFetchMixin()
+        runner.nitter = client
+        runner.config = {}
+        runner._log_verbose_info = lambda *args, **kwargs: None
+        runner._effective_filter_reposts = lambda group: True
+
+        group = types.SimpleNamespace(
+            group_id="test",
+            group_type="blogger",
+            is_tag_group=False,
+            is_list_group=False,
+        )
+        with patch.object(
+            client,
+            "_fetch_tweets_for_scheduler_from_instances",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as mock_inner:
+            user_result = await runner._fetch_group_user(
+                group,
+                0,
+                "NASA",
+                20,
+                skip_plain_text=True,
+                scan_watermark=["100"],
+                concurrent=True,
+            )
+            self.assertEqual(user_result.username, "NASA")
+            self.assertIsNone(user_result.error)
+            mock_inner.assert_awaited_once_with(
+                "NASA",
+                ["100"],
+                ["http://127.0.0.1:8080"],
+                skip_plain_text=True,
+                retry_attempts=2,
+                total_retry_attempts_per_instance=False,
+                filter_reposts=True,
+                path_override="NASA/media",
+            )
