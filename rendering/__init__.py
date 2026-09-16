@@ -1,3 +1,3 @@
-from .tweets import TweetBatch, TweetMessageRenderer
+from .tweets import TweetBatch, TweetMessageRenderer, format_twitter_trends
 
-__all__ = ["TweetBatch", "TweetMessageRenderer"]
+__all__ = ["TweetBatch", "TweetMessageRenderer", "format_twitter_trends"]

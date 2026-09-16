@@ -15,6 +15,7 @@ try:
         resolve_hide_original_when_translated,
         resolve_manual_send_interval,
     )
+    from ..media_support.fxtwitter_client import FxTwitterClient
     from ..media_support.html_backend.query import MAX_QUERY_LENGTH
     from ..media_support.network import UnsafeUrlError, validate_http_url
     from ..media_support.search_session_buffer import (
@@ -22,6 +23,7 @@ try:
         MAX_PAGES_PER_FILL,
         SearchSessionStore,
     )
+    from ..rendering.tweets import format_twitter_trends
     from ..shared import normalize_username, safe_call
     from ..shared.observability import safe_task_log
 except ImportError:
@@ -30,6 +32,7 @@ except ImportError:
         resolve_hide_original_when_translated,
         resolve_manual_send_interval,
     )
+    from media_support.fxtwitter_client import FxTwitterClient
     from media_support.html_backend.query import MAX_QUERY_LENGTH
     from media_support.network import UnsafeUrlError, validate_http_url
     from media_support.search_session_buffer import (
@@ -37,6 +40,7 @@ except ImportError:
         MAX_PAGES_PER_FILL,
         SearchSessionStore,
     )
+    from rendering.tweets import format_twitter_trends
     from shared import normalize_username, safe_call
     from shared.observability import safe_task_log
 
@@ -579,6 +583,66 @@ class ManualCommandMixin:
             return
 
         await self._send_tweets_response(event, username, instance, tweets)
+
+    async def _cmd_tweet_trends_impl(self, event: AstrMessageEvent):
+        """查看 Twitter/X 实时趋势热搜榜。"""
+        event.stop_event()
+
+        cooldown_left = self._cooldown_left(event, scope="trends")
+        if cooldown_left > 0:
+            await event.send(
+                event.plain_result(f"请求太快啦，{cooldown_left:.0f} 秒后再试。")
+            )
+            return
+
+        self._mark_cooldown(event, scope="trends")
+        started = time.perf_counter()
+
+        client = getattr(self, "fxtwitter", None)
+        if client is None:
+            client = FxTwitterClient()
+            self.fxtwitter = client
+
+        try:
+            trends = await asyncio.to_thread(client.fetch_trends)
+        except Exception as exc:
+            logger.warning(f"[NitterTweets] 手动获取推特热搜失败: {exc}")
+            trends = []
+
+        if not trends:
+            self._log_manual_send_task(
+                "推特热搜查询",
+                operation="trends",
+                source="trends",
+                instance="api.fxtwitter.com",
+                tweet_count=0,
+                sent_count=0,
+                started=started,
+            )
+            await event.send(
+                event.plain_result(
+                    "获取 Twitter/X 实时趋势热搜失败或暂无数据，请稍后再试。"
+                )
+            )
+            return
+
+        formatted_text = format_twitter_trends(trends)
+        sent = 0
+        try:
+            await event.send(event.plain_result(formatted_text))
+            sent = len(trends)
+        except Exception as exc:
+            logger.warning(f"[NitterTweets] 发送推特热搜失败: {exc}")
+        finally:
+            self._log_manual_send_task(
+                "推特热搜查询",
+                operation="trends",
+                source="trends",
+                instance="api.fxtwitter.com",
+                tweet_count=len(trends),
+                sent_count=sent,
+                started=started,
+            )
 
     async def _send_tweets_response(
         self,

@@ -26,7 +26,7 @@ try:
         parse_config_bool,
     )
     from .delivery import TweetSender
-    from .media_support import MediaService, NitterService
+    from .media_support import FxTwitterClient, MediaService, NitterService
     from .media_support.status_link import STATUS_LINK_REGEX
     from .plugin_api import NitterWebAPI
     from .scheduler import NitterTweetScheduler
@@ -49,7 +49,7 @@ except ImportError:
         parse_config_bool,
     )
     from delivery import TweetSender
-    from media_support import MediaService, NitterService
+    from media_support import FxTwitterClient, MediaService, NitterService
     from media_support.status_link import STATUS_LINK_REGEX
     from plugin_api import NitterWebAPI
     from scheduler import NitterTweetScheduler
@@ -77,6 +77,7 @@ class NitterTweetsPlugin(
         migrate_legacy_grouped_config(self.config)
         migrate_default_group_config(self.config)
         self.nitter = NitterService(config, session_dir=self._html_session_dir())
+        self.fxtwitter = FxTwitterClient()
         for key, values in self.nitter.ignored_legacy_instances.items():
             labels = ", ".join(self._instance_log_label(value) for value in values)
             logger.warning(
@@ -218,6 +219,11 @@ class NitterTweetsPlugin(
     async def cmd_tweet_search_media(self, event: AstrMessageEvent, args=GreedyStr):
         """只搜带图片/视频的推文。用法：/推文搜图 <query> [数量] [热门]"""
         return await self._cmd_tweet_search_impl(event, args, is_media_search=True)
+
+    @filter.command("推特热搜", alias={"twitter热搜", "推文热搜", "推特趋势"})
+    async def cmd_tweet_trends(self, event: AstrMessageEvent):
+        """查看 Twitter/X 实时趋势热搜榜。用法：/推特热搜"""
+        return await self._cmd_tweet_trends_impl(event)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("镜像测试")
