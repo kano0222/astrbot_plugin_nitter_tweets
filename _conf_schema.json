@@ -4,17 +4,22 @@
     "type": "object",
     "hint": "Nitter 请求和手动查询的基础配置。",
     "items": {
+      "fetch_backend": {
+        "description": "推文抓取后端策略",
+        "type": "string",
+        "default": "mix",
+        "options": [
+          "mix",
+          "nitter",
+          "fx"
+        ],
+        "hint": "抓取博主与标签推文的策略：mix 优先 FxTwitter，遇到限流/404/故障自动平滑回退至自建 Nitter；nitter 仅自建 Nitter；fx 仅 FxTwitter（推特 List 不支持 Fx，硬性保持走 Nitter）。"
+      },
       "instances": {
         "description": "自建 Nitter 实例列表",
         "type": "list",
         "default": [],
         "hint": "填写你自己部署的 Nitter 地址，每行一个地址，不要用逗号分隔；同一列表同时用于 RSS、HTML 搜索和 List。AstrBot 与 Nitter 在同一 Docker 网络时填 http://nitter:8080；不要在 AstrBot 容器内填写 127.0.0.1，除非 Nitter 就在同一个容器。公共实例已停止维护，不再提供默认地址。"
-      },
-      "default_limit": {
-        "description": "手动查询默认条数",
-        "type": "int",
-        "default": 5,
-        "hint": "用于 /推文 用户名 和 /镜像测试 [用户名] 镜像站URL 未填写数量时的默认获取条数；用户填写数量时不会被此项截断。为避免刷屏和实例压力，建议日常不要一次请求过多。"
       },
       "request_timeout": {
         "description": "单个 Nitter 实例超时秒数",
@@ -34,29 +39,33 @@
         "default": 5.0,
         "hint": "两次重试之间的等待秒数，默认 5。设为 0 表示不等待。"
       },
-      "cooldown_seconds": {
-        "description": "用户请求冷却秒数",
-        "type": "float",
-        "default": 15.0,
-        "hint": "同一会话同一用户的命令冷却，降低实例压力。设为 0 可关闭。"
-      },
       "filter_reposts_enabled": {
         "description": "转发过滤总开关",
         "type": "bool",
         "default": true,
         "hint": "控制 Blogger、Tag、List 后台检查。关闭时所有分组都保留转发；开启后还需对应分组的“过滤转发”开关开启才会过滤。博主自己发布的引用或评论推文仍会保留。手动命令不受分组开关影响。老配置缺少该项时按开启处理。"
       },
-      "auto_parse_tweet_links_enabled": {
-        "description": "自动解析聊天中的推文链接",
-        "type": "bool",
-        "default": false,
-        "hint": "开启后无需命令：识别消息里的公开 X/Twitter 推文链接并发送正文与媒体。默认关闭。忽略 Bot 自己的消息。翻译与「有译文时显示原文」跟随全局 AI 翻译设置。不受订阅、冷却、seen 和全局图/视频开关限制；仍受大小、时长、超时等安全限制。勿与同类链接解析插件同时对同一会话开启以免重复回复。"
+      "default_limit": {
+        "description": "手动查询默认条数",
+        "type": "int",
+        "default": 5,
+        "hint": "用于 /推文 用户名 和 /镜像测试 [用户名] 镜像站URL 未填写数量时的默认获取条数；用户填写数量时不会被此项截断。为避免刷屏和实例压力，建议日常不要一次请求过多。"
       },
-      "link_preview_arbiter_enabled": {
-        "description": "跨 Bot 仲裁（防重复解析）",
-        "type": "bool",
-        "default": true,
-        "hint": "OneBot 群聊中多个同类 Bot 同时开启被动链接解析时，通过 QQ 表情回应仲裁，只有赢的 Bot 解析回复。会给被解析的消息贴上表情标记（永久）。单 Bot 环境可关闭以省去约 1s 仲裁延迟。协议移植自 astrbot_plugin_parser 的 EmojiLikeArbiter。"
+      "cooldown_seconds": {
+        "description": "用户请求冷却秒数",
+        "type": "float",
+        "default": 15.0,
+        "hint": "同一会话同一用户的命令冷却，降低实例压力。设为 0 可关闭。"
+      },
+      "search_sort": {
+        "description": "搜索排序方式",
+        "type": "string",
+        "default": "latest",
+        "options": [
+          "latest",
+          "top"
+        ],
+        "hint": "latest=按时间序（对应 f=tweets，默认）；top=按热门度（对应 f=top，推特综合算法流）。主要影响手动 /推文搜索 与 /推文搜图；后台 Tag 增量扫描强制保持最新时间序，博主与 List RSS 不受影响。手动搜索可用「-top」按热门排序，或「-last」强制时间序（覆盖全局 top 设置）。"
       },
       "search_max_limit": {
         "description": "搜索最大条数",
@@ -70,32 +79,23 @@
         "default": 3.0,
         "hint": "全局 HTML 串行节流；429 冷却另计（30s 起，封顶 5 分钟）。"
       },
-      "search_sort": {
-        "description": "搜索排序方式",
-        "type": "string",
-        "default": "latest",
-        "options": [
-          "latest",
-          "top"
-        ],
-        "hint": "latest=按时间序（对应 f=tweets，默认）；top=按热门度（对应 f=top，推特综合算法流）。主要影响手动 /推文搜索 与 /推文搜图；后台 Tag 增量扫描强制保持最新时间序，博主与 List RSS 不受影响。手动搜索可用「-top」按热门排序，或「-last」强制时间序（覆盖全局 top 设置）。"
-      },
       "html_max_pages": {
         "description": "HTML 最大翻页数",
         "type": "int",
         "default": 1,
         "hint": "手动搜索按请求上限截断；Tag 搜索和 List HTML 回退首轮最多取 20 条建立基准，已有水位后最多翻到该页数以寻找旧水位或游标末尾。List RSS 不受此限制（按 Min-Id 分页，同 Blogger）。Tag/List 达到上限仍未命中旧基准时，max_tweets_per_check=0 会跳过推送并用当前第一页最多 20 个状态 ID 自动重建基准，正数按上限推送成功后再重建；若第一页没有有效状态 ID、发送失败或基准写入失败，则保留旧水位。持久化水位始终最多保存 20 个 ID。"
       },
-      "fetch_backend": {
-        "description": "推文抓取后端策略",
-        "type": "string",
-        "default": "mix",
-        "options": [
-          "mix",
-          "nitter",
-          "fx"
-        ],
-        "hint": "抓取博主与标签推文的策略：mix 优先 FxTwitter，遇到限流/404/故障自动平滑回退至自建 Nitter；nitter 仅自建 Nitter；fx 仅 FxTwitter（推特 List 不支持 Fx，硬性保持走 Nitter）。"
+      "auto_parse_tweet_links_enabled": {
+        "description": "自动解析聊天中的推文链接",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后无需命令：识别消息里的公开 X/Twitter 推文链接并发送正文与媒体。默认关闭。忽略 Bot 自己的消息。翻译与「有译文时显示原文」跟随全局 AI 翻译设置。不受订阅、冷却、seen 和全局图/视频开关限制；仍受大小、时长、超时等安全限制。勿与同类链接解析插件同时对同一会话开启以免重复回复。"
+      },
+      "link_preview_arbiter_enabled": {
+        "description": "跨 Bot 仲裁（防重复解析）",
+        "type": "bool",
+        "default": true,
+        "hint": "OneBot 群聊中多个同类 Bot 同时开启被动链接解析时，通过 QQ 表情回应仲裁，只有赢的 Bot 解析回复。会给被解析的消息贴上表情标记（永久）。单 Bot 环境可关闭以省去约 1s 仲裁延迟。协议移植自 astrbot_plugin_parser 的 EmojiLikeArbiter。"
       }
     }
   },
@@ -219,12 +219,6 @@
         "default": false,
         "hint": "开启后，插件才会按用户分组配置执行间隔检查或每日检查，并推送到对应分组的推送目标；关闭时分组里的间隔检查开关和每日检查时间均不会触发。"
       },
-      "notify_no_updates": {
-        "description": "后台检查无新推文时发送检查结果提示",
-        "type": "bool",
-        "default": false,
-        "hint": "关闭时只有发现新推文或失败时写日志；开启后，本次无更新或首次建立订阅源基线时也会向对应分组的推送目标发送检查摘要。"
-      },
       "check_on_startup": {
         "description": "启动后立即检查",
         "type": "bool",
@@ -236,6 +230,12 @@
         "type": "int",
         "default": 30,
         "hint": "这里只设置间隔时间，不是间隔检查总开关；后台检查总开关开启后，启用间隔检查的用户分组都会按这个全局间隔运行，范围 1-1440。"
+      },
+      "notify_no_updates": {
+        "description": "后台检查无新推文时发送检查结果提示",
+        "type": "bool",
+        "default": false,
+        "hint": "关闭时只有发现新推文或失败时写日志；开启后，本次无更新或首次建立订阅源基线时也会向对应分组的推送目标发送检查摘要。"
       }
     }
   },
