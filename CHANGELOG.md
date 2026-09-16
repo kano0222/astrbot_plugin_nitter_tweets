@@ -2,6 +2,23 @@
 
 所有重要变更都会记录在这里。
 
+## [1.6.0] - 2026-09-16
+
+### Added
+
+- 支持 `fetch_backend` 三档推文抓取后端策略（`basic` 组，默认 `mix`）：
+  - `mix`（混合容灾模式，默认）：优先通过 FxTwitter 高速 API 并发拉取博主与标签推文；当 FxTwitter 遇到限流、404 或网络故障时，仅将失败的博主/查询增量交由自建 Nitter 实例接盘，实现高可用与自建 Nitter 低负载的最佳平衡。
+  - `nitter`（纯自建模式）：完全基于自建 Nitter 实例的 RSS 与 HTML 搜索管道，与历史版本行为一致，无外部第三方 API 依赖。
+  - `fx`（纯 FxTwitter 模式）：博主与标签推文全部走 FxTwitter API，无需自建 Nitter 即可轻量运行（List 分组仍物理锁定 Nitter）。
+- 新增 `/推特热搜` 实时趋势榜单指令（别名 `/twitter热搜`、`/推文热搜`、`/推特趋势`）：获取 Twitter/X 实时趋势热搜榜，展示排名、话题名称与推文热度；内置指令冷却、审计日志并防御性兼容上游 rank 为 null 的异常数据。
+- 新增 `send_batch_summary_enabled` 配置项（`push` 组，默认 `true`，Close #74）：控制在非合并普通推送时是否发送批次概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，静音单独的概括横幅；QQ 合并转发整包发送不受影响。
+
+### Architecture & Defenses
+
+- **List 订阅严格物理隔离锁定 Nitter**：因 FxTwitter 原生不支持 Twitter List 端点，List 订阅分组严格与 FxTwitter 物理隔离，无论 `fetch_backend` 配置为何种模式，List 抓取始终强制走自建 Nitter 实例管道（RSS 优先并平滑回退 HTML）。
+- **转推守卫机制（Retweet Guard）**：针对 `filter_reposts_enabled=false`（用户想保留转推）场景，避免 FxTwitter `media` 专线端点在服务端将转推丢弃；转推保留时强制抓取 `statuses` 时间线全量推文并在本地过滤纯文本，确保转推中的图片与视频媒体不丢失。
+- **Tag 搜索 SafeSearch 404 平滑回退**：FxTwitter 搜索接口默认启用 SafeSearch，对于敏感或成人向标签推文可能直接返回 404；在 `mix` 模式下识别 404 / 限流等异常并自动无缝回退至自建 Nitter HTML 搜索，确保订阅推文不遗漏，且失败日志经过敏感信息脱敏处理。
+
 ## [1.5.0] - 2026-09-15
 
 > **💡 1.5.0 运维与配置建议**：

@@ -15,11 +15,31 @@ AstrBot WebUI 的 `tweet_groups` 添加时先选 **博主分组**（`blogger`）
 - `performance`: 后台账号并发拉取和并发准备。
 - `logging`: 日志模式。
 
-## 实例配置
+## 抓取后端与实例配置
 
 | 配置键 | 用途 | 说明 |
 | --- | --- | --- |
+| `fetch_backend`（`basic`） | 推文抓取后端策略 | 可选 `mix`（默认）、`nitter`、`fx`。控制博主与标签推文优先从 FxTwitter 还是自建 Nitter 拉取。 |
 | `instances`（`basic`） | RSS、HTML 搜索、List RSS | 仅填写自建 Nitter，可配多个；无默认公共实例 |
+
+### `fetch_backend` 抓取后端策略原理
+
+- **`mix`（混合容灾模式，默认推荐）**：
+  - **原理**：博主推文和标签搜索优先调用 FxTwitter API 高速并发拉取；当 FxTwitter 返回超时、HTTP 429 限流或 404（如 SafeSearch 拦截）时，调度器与手动命令将拉取失败的博主/查询增量移交自建 Nitter 实例接盘。
+  - **优缺点**：拉取极速、元数据完整，极大减轻自建 Nitter 压力；兼备自建 Nitter 容灾保底。
+- **`nitter`（纯自建 Nitter 模式）**：
+  - **原理**：完全使用自建 Nitter 实例的 RSS 与 HTML 搜索管道，与历史版本行为一致，不调用 FxTwitter。
+  - **优缺点**：100% 本地自托管，无第三方公共 API 依赖；但对自建 Nitter 稳定度和账号池要求高，高频下易触发 429。
+- **`fx`（纯 FxTwitter 模式）**：
+  - **原理**：博主推文和标签搜索全部走 FxTwitter API，失败时不向自建 Nitter 回退。
+  - **优缺点**：无需自建和维护 Nitter 容器与 Redis；但完全依赖外部服务可用性，且 List 分组仍硬性走 Nitter。
+- **List 物理隔离锁定说明**：
+  - FxTwitter 原生不提供 Twitter List 端点。
+  - 无论全局 `fetch_backend` 设置为 `mix`、`nitter` 还是 `fx`，所有 `group_type: list` 的分组调度检查**严格物理锁定走自建 Nitter 管道**（List RSS 优先，失败平滑回退 HTML 翻页），绝对不调用 FxTwitter。
+- **转推守卫机制（Retweet Guard）**：
+  - 在 `filter_reposts_enabled=false`（保留转推）场景下，为避免 FxTwitter `/media` 相册端点在推特服务端丢弃转推，强制走 `statuses` 时间线端点拉取全量推文并在本地进行纯文本过滤，确保转推媒体不丢失。
+- **Tag SafeSearch 404 平滑回退**：
+  - FxTwitter 搜索默认开启推特 SafeSearch，敏感/成人向检索会直接返回 404；`mix` 模式识别 404 异常并自动无缝回退至自建 Nitter HTML 搜索，确保推文不遗漏。
 
 同一自建实例同时承担 RSS 和 HTML。旧版 `search_instances`、`blogger_html_instances`、`concurrent_fetch_instances` 已删除，仅在启动日志中提示，不读取、不迁移、不写回。
 
@@ -68,6 +88,12 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 | `send_batch_summary_enabled` | `true` | 非合并普通推送时是否发送概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，阻断发送单独的概括消息；QQ 合并转发整包发送时不使用本项。 |
 | `manual_send_interval` | `0` | 手动命令逐条发送间隔秒数。 |
 | `target_blocked_users` | `[]` | 隐藏列表配置，每项为完整 UMO 与其用户名列表；同一目标跨多个分组共享，命令和 Dashboard 维护，发送阶段按目标过滤。目标 UMO 需完整格式（如 `aiocqhttp:GroupMessage:123`）。 |
+
+### `send_batch_summary_enabled` 批次概括横幅控制
+
+- **解决痛点（Close #74）**：普通逐条推送（非合并转发）时，调度器默认会在推文卡片前先发送一条批次概括横幅（如“📬 默认分组 · 1 位博主 · 1 条新推文”）。部分推送群聊希望降低刷屏干扰，仅接收推文卡片本身。
+- **实现机制**：在普通逐条推送发送流程（`runner_send`）中，当该配置项为 `false` 时，动态将目标批次概括内容置空，从而直接阻断发送单独的概括横幅消息。
+- **合并转发差异**：私人号 OneBot 满足 `merge_tweet_threshold` 触发合并转发时，概括横幅作为整包的头部索引节点保留，不受该开关影响。
 
 `watch_users` 和 `push_targets` 顶层字段是旧版兼容字段，启动后迁移到默认分组。
 
