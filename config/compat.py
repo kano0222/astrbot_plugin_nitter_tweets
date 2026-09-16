@@ -129,6 +129,7 @@ CONFIG_GROUP_BY_KEY = {
     "fetch_concurrency": "performance",
     "concurrent_prepare_enabled": "performance",
     "prepare_concurrency": "performance",
+    "send_batch_summary_enabled": "push",
     "merge_tweet_threshold": "push",
     "merge_scheduled_updates": "push",
     "send_target_interval": "push",

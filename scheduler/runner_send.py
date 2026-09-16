@@ -24,7 +24,11 @@ except ImportError:
 
 try:
     from ..ai import format_ai_tweet_summary
-    from ..config import configured_merge_tweet_threshold
+    from ..config import (
+        config_get,
+        configured_merge_tweet_threshold,
+        parse_config_bool,
+    )
     from ..rendering import TweetMessageRenderer
     from ..shared import format_subscription_source
     from ..shared.group_ids import DEFAULT_GROUP_NAME, is_default_group
@@ -38,7 +42,11 @@ try:
     )
 except ImportError:
     from ai import format_ai_tweet_summary
-    from config import configured_merge_tweet_threshold
+    from config import (
+        config_get,
+        configured_merge_tweet_threshold,
+        parse_config_bool,
+    )
     from rendering import TweetMessageRenderer
     from scheduler.config import ScheduleGroup
     from scheduler.formatting import (
@@ -56,6 +64,13 @@ except ImportError:
 
 class SchedulerSendMixin:
     """定时推送的发送路径。"""
+
+    @property
+    def send_batch_summary_enabled(self) -> bool:
+        return parse_config_bool(
+            config_get(getattr(self, "config", {}), "send_batch_summary_enabled", True),
+            True,
+        )
 
     def _tweets_for_target(
         self,
@@ -265,7 +280,7 @@ class SchedulerSendMixin:
                         if batch_summary_tracker is not None
                         else ""
                     )
-                    if target_filtered_count:
+                    if not self.send_batch_summary_enabled or target_filtered_count:
                         target_batch_summary = ""
                     if target_batch_summary:
                         summary_outcome = await self.sender.send_summary_to_umo(
@@ -380,6 +395,8 @@ class SchedulerSendMixin:
             if batch_index < len(batches) - 1 and user_interval > 0:
                 await asyncio.sleep(user_interval)
         return total_success
+
+    _send_ordinary_batches = _send_per_user_updates
 
     @staticmethod
     def _scheduled_update_header(

@@ -233,6 +233,12 @@
     "type": "object",
     "hint": "配置 QQ 合并阈值、发送间隔和订阅分组；订阅源和推送目标请在分组中填写。",
     "items": {
+      "send_batch_summary_enabled": {
+        "description": "发送批次概括横幅",
+        "type": "bool",
+        "default": true,
+        "hint": "在非合并普通推送时是否发送概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，阻断发送单独的概括消息；QQ 合并转发整包发送时不使用本项。"
+      },
       "merge_tweet_threshold": {
         "description": "QQ 合并推送触发条数",
         "type": "int",

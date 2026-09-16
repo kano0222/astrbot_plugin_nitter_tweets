@@ -11,7 +11,7 @@ AstrBot WebUI 的 `tweet_groups` 添加时先选 **博主分组**（`blogger`）
 - `media`: 图片、视频、传输编码、xdown、缓存。
 - `ai_translation`: 翻译。
 - `schedule`: 后台检查总开关和全局频率。
-- `push`: `tweet_groups`、推送间隔、合并阈值和目标级作者黑名单。
+- `push`: `tweet_groups`、推送间隔、合并阈值、批次概括横幅与目标级作者黑名单。
 - `performance`: 后台账号并发拉取和并发准备。
 - `logging`: 日志模式。
 
@@ -63,8 +63,11 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 全局推送：
 
-- `manual_send_interval`（默认 `0`）：手动命令逐条发送间隔秒数。
-- `target_blocked_users`：隐藏列表配置，每项为完整 UMO 与其用户名列表；同一目标跨多个分组共享，命令和 Dashboard 维护，发送阶段按目标过滤。目标 UMO 需完整格式（如 `aiocqhttp:GroupMessage:123`）。
+| 配置键 | 默认 | 说明 |
+| --- | --- | --- |
+| `send_batch_summary_enabled` | `true` | 非合并普通推送时是否发送概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，阻断发送单独的概括消息；QQ 合并转发整包发送时不使用本项。 |
+| `manual_send_interval` | `0` | 手动命令逐条发送间隔秒数。 |
+| `target_blocked_users` | `[]` | 隐藏列表配置，每项为完整 UMO 与其用户名列表；同一目标跨多个分组共享，命令和 Dashboard 维护，发送阶段按目标过滤。目标 UMO 需完整格式（如 `aiocqhttp:GroupMessage:123`）。 |
 
 `watch_users` 和 `push_targets` 顶层字段是旧版兼容字段，启动后迁移到默认分组。
 
