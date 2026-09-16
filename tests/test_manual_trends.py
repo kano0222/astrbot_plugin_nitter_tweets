@@ -108,6 +108,7 @@ class TestManualTrendsCommand:
         assert len(logged_tasks) == 1
         assert logged_tasks[0]["title"] == "推特热搜查询"
         assert logged_tasks[0]["operation"] == "trends"
+        assert logged_tasks[0]["instance"] == "FxTwitter"
         assert logged_tasks[0]["tweet_count"] == 2
         assert logged_tasks[0]["sent_count"] == 2
 
@@ -154,10 +155,12 @@ class TestManualTrendsCommand:
         event.stop_event.assert_called_once()
         event.send.assert_awaited_once()
         msg = event.send.await_args[0][0]
-        assert "暂无数据" in msg or "失败" in msg
+        assert "暂无数据" in msg
 
         assert len(logged_tasks) == 1
         assert logged_tasks[0]["status"] == "无数据"
+        assert logged_tasks[0]["instance"] == "FxTwitter"
+        assert logged_tasks[0]["warning"] is True
 
     @pytest.mark.asyncio
     async def test_cmd_tweet_trends_exception_fallback(self, monkeypatch):
@@ -180,10 +183,13 @@ class TestManualTrendsCommand:
         event.stop_event.assert_called_once()
         event.send.assert_awaited_once()
         msg = event.send.await_args[0][0]
-        assert "失败" in msg or "暂无数据" in msg
+        assert "失败" in msg
 
         assert len(logged_tasks) == 1
-        assert logged_tasks[0]["status"] == "无数据"
+        assert logged_tasks[0]["status"] == "抓取失败"
+        assert logged_tasks[0]["instance"] == "FxTwitter"
+        assert logged_tasks[0]["error_detail"] == "Connection timeout"
+        assert logged_tasks[0]["warning"] is True
 
 
 class TestPluginCommandRegistration:

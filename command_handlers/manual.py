@@ -61,6 +61,18 @@ class ManualCommandMixin:
         )
 
     @property
+    def search_sort(self) -> str:
+        val = (
+            str(
+                config_get(getattr(self, "config", {}), "search_sort", "latest")
+                or "latest"
+            )
+            .strip()
+            .lower()
+        )
+        return "top" if val == "top" else "latest"
+
+    @property
     def fxtwitter_client(self) -> FxTwitterClient:
         client = getattr(self, "fxtwitter", None)
         if client is None:
@@ -197,11 +209,7 @@ class ManualCommandMixin:
                     skip_plain_text=False,
                     filter_reposts=False,
                 )
-                inst = getattr(fx, "base_url", "https://api.fxtwitter.com")
-                instance = (
-                    inst.replace("https://", "").replace("http://", "").rstrip("/")
-                    or "api.fxtwitter.com"
-                )
+                instance = "FxTwitter"
                 tweets = fx_tweets
             except Exception as exc:
                 fx_error = exc
@@ -213,9 +221,10 @@ class ManualCommandMixin:
                         "推文查询失败",
                         operation="user_timeline",
                         source=f"@{username}",
+                        instance="FxTwitter",
                         started=started,
                         status="抓取失败",
-                        error_detail=str(exc),
+                        error_detail=sanitize_sensitive_text(str(exc)),
                         warning=True,
                     )
                     await event.send(
@@ -233,9 +242,10 @@ class ManualCommandMixin:
                 self.nitter.begin_run_host_skip()
             try:
                 try:
-                    instance, tweets = await self.nitter.fetch_user(
+                    nitter_inst, tweets = await self.nitter.fetch_user(
                         username, limit, filter_reposts=False
                     )
+                    instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
                 except Exception as exc:
                     logger.warning(
                         f"[NitterTweets] 手动获取 @{sanitize_sensitive_text(username)} 推文失败: {sanitize_sensitive_text(str(exc))}"
@@ -244,6 +254,7 @@ class ManualCommandMixin:
                         "推文查询失败",
                         operation="user_timeline",
                         source=f"@{username}",
+                        instance=instance or "Nitter",
                         started=started,
                         status="抓取失败",
                         error_detail=sanitize_sensitive_text(str(exc)),
@@ -326,7 +337,9 @@ class ManualCommandMixin:
 
         session_id = self._search_session_id(event)
         store = self._get_search_session_store()
-        query_key = self._search_query_key(effective_query, sort)
+        effective_sort = sort or getattr(self, "search_sort", "latest")
+        query_sort = effective_sort if (sort or effective_sort != "latest") else ""
+        query_key = self._search_query_key(effective_query, query_sort)
         buf = store.get_or_create(session_id, query_key)
 
         sent_progress = [0]
@@ -408,13 +421,9 @@ class ManualCommandMixin:
                     query,
                     count=fetch_limit,
                     is_media=is_media_search,
-                    feed=("top" if sort == "top" else "latest"),
+                    feed=("top" if effective_sort == "top" else "latest"),
                 )
-                inst = getattr(fx, "base_url", "https://api.fxtwitter.com")
-                instance = (
-                    inst.replace("https://", "").replace("http://", "").rstrip("/")
-                    or "api.fxtwitter.com"
-                )
+                instance = "FxTwitter"
                 fetched = fx_tweets
             except Exception as exc:
                 fx_error = exc
@@ -426,6 +435,7 @@ class ManualCommandMixin:
                         "推文搜索失败",
                         operation="tweet_search",
                         source=query,
+                        instance="FxTwitter",
                         started=search_started,
                         status="抓取失败",
                         error_detail=sanitize_sensitive_text(str(exc)),
@@ -441,21 +451,23 @@ class ManualCommandMixin:
             backend == "mix" and (fx is None or fx_error is not None)
         ):
             try:
-                instance, fetched = await asyncio.to_thread(
+                nitter_inst, fetched = await asyncio.to_thread(
                     self.nitter.search,
                     effective_query,
                     fetch_limit,
                     max_pages=pages,
-                    sort=sort or None,
+                    sort=effective_sort or None,
                 )
+                instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
             except TypeError:
                 try:
-                    instance, fetched = await asyncio.to_thread(
+                    nitter_inst, fetched = await asyncio.to_thread(
                         self.nitter.search,
                         effective_query,
                         fetch_limit,
-                        sort=sort or None,
+                        sort=effective_sort or None,
                     )
+                    instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
                 except Exception as exc:
                     logger.warning(
                         f"[NitterTweets] 搜索失败 query={sanitize_sensitive_text(query)!r}: {sanitize_sensitive_text(str(exc))}"
@@ -464,6 +476,7 @@ class ManualCommandMixin:
                         "推文搜索失败",
                         operation="tweet_search",
                         source=query,
+                        instance=instance or "Nitter",
                         started=search_started,
                         status="抓取失败",
                         error_detail=sanitize_sensitive_text(str(exc)),
@@ -481,6 +494,7 @@ class ManualCommandMixin:
                     "推文搜索失败",
                     operation="tweet_search",
                     source=query,
+                    instance=instance or "Nitter",
                     started=search_started,
                     status="抓取失败",
                     error_detail=sanitize_sensitive_text(str(exc)),
@@ -746,22 +760,33 @@ class ManualCommandMixin:
             logger.warning(
                 f"[NitterTweets] 手动获取推特热搜失败: {sanitize_sensitive_text(str(exc))}"
             )
-            trends = []
+            self._log_manual_no_send_task(
+                "推特热搜查询",
+                operation="trends",
+                source="trends",
+                instance="FxTwitter",
+                started=started,
+                status="抓取失败",
+                error_detail=sanitize_sensitive_text(str(exc)),
+                warning=True,
+            )
+            await event.send(
+                event.plain_result("获取 Twitter/X 实时趋势热搜失败，请稍后重试。")
+            )
+            return
 
         if not trends:
             self._log_manual_no_send_task(
                 "推特热搜查询",
                 operation="trends",
                 source="trends",
-                instance="api.fxtwitter.com",
+                instance="FxTwitter",
                 started=started,
                 status="无数据",
                 warning=True,
             )
             await event.send(
-                event.plain_result(
-                    "获取 Twitter/X 实时趋势热搜失败或暂无数据，请稍后再试。"
-                )
+                event.plain_result("获取 Twitter/X 实时趋势热搜暂无数据，请稍后再试。")
             )
             return
 
@@ -779,7 +804,7 @@ class ManualCommandMixin:
                 "推特热搜查询",
                 operation="trends",
                 source="trends",
-                instance="api.fxtwitter.com",
+                instance="FxTwitter",
                 tweet_count=len(trends),
                 sent_count=sent,
                 started=started,

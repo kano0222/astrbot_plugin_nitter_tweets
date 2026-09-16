@@ -6,12 +6,24 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.core.star.filter.command import GreedyStr
 
 try:
+    from ..config import config_get
     from ..delivery import TweetSender
 except ImportError:
+    from config import config_get
     from delivery import TweetSender
 
 
 class MaintenanceCommandMixin:
+    @property
+    def fetch_backend(self) -> str:
+        return (
+            str(
+                config_get(getattr(self, "config", {}), "fetch_backend", "mix") or "mix"
+            )
+            .strip()
+            .lower()
+        )
+
     async def _cmd_tweets_status_impl(self, event: AstrMessageEvent):
         """查看定时推文检查状态。"""
         event.stop_event()

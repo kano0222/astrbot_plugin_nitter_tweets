@@ -17,8 +17,9 @@ from media_support.fxtwitter_client import (
 )
 from media_support.search_session_buffer import SearchSessionStore
 from scheduler.config import SchedulerConfigReader
-from scheduler.models import SourceStatus
+from scheduler.models import ScheduledCheckResult, SourceStatus
 from scheduler.runner_fetch import SchedulerFetchMixin
+from scheduler.runner_status import SchedulerStatusMixin
 from shared.utils import TweetItem, TweetMedia
 
 
@@ -156,7 +157,8 @@ async def test_multi_blogger_all_success_does_not_call_nitter():
 
     for r in results:
         assert r.error is None
-        assert r.instance == "api.fxtwitter.com"
+        assert r.instance == "FxTwitter"
+        assert r.host_attempts == ["FxTwitter=成功"]
         assert len(r.tweets) == 1
         assert r.fetch_status == SourceStatus.SUCCESS
 
@@ -216,9 +218,18 @@ async def test_multi_blogger_partial_success_incremental_nitter_fallback():
     # Results merged
     assert len(results) == 3
     results_by_user = {r.username: r for r in results}
-    assert results_by_user["alice"].instance == "api.fxtwitter.com"
+    assert results_by_user["alice"].instance == "FxTwitter"
+    assert results_by_user["alice"].host_attempts == ["FxTwitter=成功"]
     assert results_by_user["bob"].instance == "http://nitter.test"
+    assert results_by_user["bob"].host_attempts == [
+        "FxTwitter=失败",
+        "http://nitter.test=成功",
+    ]
     assert results_by_user["carol"].instance == "http://nitter.test"
+    assert results_by_user["carol"].host_attempts == [
+        "FxTwitter=失败",
+        "http://nitter.test=成功",
+    ]
 
 
 @pytest.mark.asyncio
@@ -360,7 +371,8 @@ async def test_tag_search_mix_fx_success_does_not_call_nitter():
     assert len(results) == 1
     mock_fx.search_tweets.assert_called_once()
     mock_nitter.search.assert_not_called()
-    assert results[0].instance == "api.fxtwitter.com"
+    assert results[0].instance == "FxTwitter"
+    assert results[0].host_attempts == ["FxTwitter=成功"]
     assert len(results[0].tweets) == 1
 
 
@@ -664,6 +676,218 @@ async def test_manual_cmd_tweet_search_passes_top_feed():
     mock_fx.search_tweets.assert_called_once()
     call_kwargs = mock_fx.search_tweets.call_args[1]
     assert call_kwargs.get("feed") == "top"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_search_inherits_config_search_sort_top():
+    """Unspecified sort on CLI automatically inherits search_sort='top' from config."""
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    tw = _make_tweet("topuser", "6666")
+    mock_fx.search_tweets = MagicMock(return_value=([tw], None))
+
+    host = DummyManualHost(
+        {"fetch_backend": "mix", "search_sort": "top"}, mock_nitter, mock_fx
+    )
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_inherit_top"
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweet_search_impl(event, "#news 2")
+
+    mock_fx.search_tweets.assert_called_once()
+    call_kwargs = mock_fx.search_tweets.call_args[1]
+    assert call_kwargs.get("feed") == "top"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_search_inherits_config_search_sort_top_nitter_fallback():
+    """Inherited top sort is preserved when FX fails and falls back to Nitter."""
+    mock_nitter = MagicMock()
+    mock_nitter.search = MagicMock(
+        return_value=("http://nitter.test", [_make_tweet("t", "9002")])
+    )
+
+    mock_fx = MagicMock()
+    mock_fx.search_tweets = MagicMock(
+        side_effect=FxTwitterNotFoundError("Search 404 SafeSearch")
+    )
+
+    host = DummyManualHost(
+        {"fetch_backend": "mix", "search_sort": "top"}, mock_nitter, mock_fx
+    )
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_inherit_top_fallback"
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweet_search_impl(event, "#test 2")
+
+    mock_fx.search_tweets.assert_called_once()
+    call_kwargs_fx = mock_fx.search_tweets.call_args[1]
+    assert call_kwargs_fx.get("feed") == "top"
+
+    mock_nitter.search.assert_called_once()
+    call_kwargs_nitter = mock_nitter.search.call_args[1]
+    assert call_kwargs_nitter.get("sort") == "top"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_search_default_inherits_latest():
+    """Default search_sort='latest' passes feed='latest' to FX."""
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    tw = _make_tweet("latestuser", "5555")
+    mock_fx.search_tweets = MagicMock(return_value=([tw], None))
+
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_default_latest"
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweet_search_impl(event, "#news 2")
+
+    mock_fx.search_tweets.assert_called_once()
+    call_kwargs = mock_fx.search_tweets.call_args[1]
+    assert call_kwargs.get("feed") == "latest"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_search_explicit_last_overrides_config_search_sort_top():
+    """Explicit -last on CLI overrides config search_sort='top'."""
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    tw = _make_tweet("latestuser", "7777")
+    mock_fx.search_tweets = MagicMock(return_value=([tw], None))
+
+    host = DummyManualHost(
+        {"fetch_backend": "mix", "search_sort": "top"}, mock_nitter, mock_fx
+    )
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_override_last"
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweet_search_impl(event, "#news 2 -last")
+
+    mock_fx.search_tweets.assert_called_once()
+    call_kwargs = mock_fx.search_tweets.call_args[1]
+    assert call_kwargs.get("feed") == "latest"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_search_explicit_last_overrides_config_search_sort_top_nitter_fallback():
+    """Explicit -last on CLI overrides config search_sort='top' on Nitter fallback."""
+    mock_nitter = MagicMock()
+    mock_nitter.search = MagicMock(
+        return_value=("http://nitter.test", [_make_tweet("t", "9003")])
+    )
+
+    mock_fx = MagicMock()
+    mock_fx.search_tweets = MagicMock(
+        side_effect=FxTwitterNotFoundError("Search 404 SafeSearch")
+    )
+
+    host = DummyManualHost(
+        {"fetch_backend": "mix", "search_sort": "top"}, mock_nitter, mock_fx
+    )
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_override_last_fallback"
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweet_search_impl(event, "#test 2 -last")
+
+    mock_fx.search_tweets.assert_called_once()
+    call_kwargs_fx = mock_fx.search_tweets.call_args[1]
+    assert call_kwargs_fx.get("feed") == "latest"
+
+    mock_nitter.search.assert_called_once()
+    call_kwargs_nitter = mock_nitter.search.call_args[1]
+    assert call_kwargs_nitter.get("sort") == "latest"
+
+
+def test_scheduler_log_fxtwitter_instance_and_fallback_trace():
+    """Verify FxTwitter instance and fallback trace in structured scheduler logs."""
+    # FX success: outputs 生效实例: FxTwitter, no failover trace
+    res_fx = ScheduledCheckResult(
+        reason="interval:20m",
+        group_id="g1",
+        group_name="测试组",
+        group_type="blogger",
+        users=["alice"],
+        source_attempts={"alice": ["FxTwitter=成功"]},
+    )
+    log_fx = res_fx.format_structured_task_log()
+    assert "生效实例: FxTwitter" in log_fx
+    assert "轮换轨迹" not in log_fx
+
+    # FX fallback to Nitter: outputs 生效实例: http://nitter.test and 轮换轨迹 containing FxTwitter ➔ Nitter
+    res_fallback = ScheduledCheckResult(
+        reason="interval:20m",
+        group_id="g1",
+        group_name="测试组",
+        group_type="blogger",
+        users=["bob"],
+        source_attempts={"bob": ["FxTwitter=失败", "http://nitter.test=成功"]},
+    )
+    log_fallback = res_fallback.format_structured_task_log()
+    assert "生效实例: http://nitter.test" in log_fallback
+    assert "轮换轨迹" in log_fallback
+    assert "FxTwitter[失败] ➔ http://nitter.test[成功]" in log_fallback
+
+
+@pytest.mark.asyncio
+async def test_status_summary_displays_fetch_backend():
+    """Verify /推文状态 summary outputs the configured fetch_backend mode."""
+
+    class _DummyStatus(SchedulerStatusMixin):
+        def __init__(self, config: dict):
+            self.config = config
+            self.is_running = True
+            self.schedule_enabled = True
+
+        def _schedule_groups(self, **kwargs):
+            return SchedulerConfigReader(self.config, context=None).schedule_groups()
+
+        def _merge_tweet_threshold(self) -> int:
+            return 2
+
+    config_mix = {
+        "schedule_enabled": True,
+        "fetch_backend": "mix",
+        "tweet_groups": [
+            {
+                "name": "博主组",
+                "group_id": "bloggers",
+                "group_type": "blogger",
+                "watch_users": ["alice"],
+            }
+        ],
+    }
+    status_mix = _DummyStatus(config_mix)
+    summary_mix = await status_mix.status_summary()
+    assert "抓取策略: mix (FxTwitter 优先 + 自建 Nitter 容灾)" in summary_mix
+
+    config_fx = dict(config_mix, fetch_backend="fx")
+    status_fx = _DummyStatus(config_fx)
+    summary_fx = await status_fx.status_summary()
+    assert "抓取策略: fx (纯 FxTwitter API 抓取)" in summary_fx
+
+    config_nitter = dict(config_mix, fetch_backend="nitter")
+    status_nitter = _DummyStatus(config_nitter)
+    summary_nitter = await status_nitter.status_summary()
+    assert "抓取策略: nitter (纯自建 Nitter 实例抓取)" in summary_nitter
 
 
 # ==============================================================================

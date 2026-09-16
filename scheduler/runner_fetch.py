@@ -138,15 +138,6 @@ class SchedulerFetchMixin:
                             skip_plain_text=skip_plain_text,
                             filter_reposts=filter_reposts,
                         )
-                        inst = getattr(
-                            fx_client, "base_url", "https://api.fxtwitter.com"
-                        )
-                        inst_cleaned = (
-                            inst.replace("https://", "")
-                            .replace("http://", "")
-                            .rstrip("/")
-                            or "api.fxtwitter.com"
-                        )
                         scanned_ids = [t.status_id for t in tweets if t.status_id]
                         anchor_ids = [t.status_id for t in tweets[:20] if t.status_id]
                         return (
@@ -154,7 +145,7 @@ class SchedulerFetchMixin:
                             UserFetchResult(
                                 index=index,
                                 username=username,
-                                instance=inst_cleaned,
+                                instance="FxTwitter",
                                 tweets=tweets,
                                 scanned_status_ids=scanned_ids,
                                 anchor_status_ids=anchor_ids,
@@ -168,6 +159,7 @@ class SchedulerFetchMixin:
                                     if tweets
                                     else SourceStatus.EMPTY
                                 ),
+                                host_attempts=["FxTwitter=成功"],
                             ),
                             None,
                         )
@@ -195,6 +187,8 @@ class SchedulerFetchMixin:
                             UserFetchResult(
                                 index=accounts.index(username),
                                 username=username,
+                                instance="FxTwitter",
+                                host_attempts=["FxTwitter=失败"],
                                 error=SchedulerTaskError.from_exception(
                                     exc or RuntimeError("FxTwitter fetch failed")
                                 ),
@@ -238,6 +232,16 @@ class SchedulerFetchMixin:
                             force_nitter=True,
                         )
                     )
+            for res in nitter_batches:
+                nitter_attempt = (
+                    f"{res.instance or 'Nitter'}=成功"
+                    if not res.error
+                    else f"{res.instance or 'Nitter'}=失败"
+                )
+                res.host_attempts = [
+                    "FxTwitter=失败",
+                    *(res.host_attempts or [nitter_attempt]),
+                ]
             return fx_batches + nitter_batches
 
         # Blogger Nitter path (backend == "nitter" or fallback when fx_client is None)
@@ -372,6 +376,7 @@ class SchedulerFetchMixin:
                             plain_text_filtered=int(
                                 scan_result.plain_text_filtered or 0
                             ),
+                            host_attempts=[f"{instance or 'Nitter'}=成功"],
                         )
                     )
                 else:
@@ -429,6 +434,7 @@ class SchedulerFetchMixin:
 
         backend = self.fetch_backend
         fx_client = self._get_fxtwitter_client()
+        fx_failed_attempt: str | None = None
         if (
             not force_nitter
             and not concurrent
@@ -443,17 +449,12 @@ class SchedulerFetchMixin:
                     skip_plain_text=skip_plain_text,
                     filter_reposts=filter_reposts,
                 )
-                inst = getattr(fx_client, "base_url", "https://api.fxtwitter.com")
-                inst_cleaned = (
-                    inst.replace("https://", "").replace("http://", "").rstrip("/")
-                    or "api.fxtwitter.com"
-                )
                 scanned_ids = [t.status_id for t in tweets if t.status_id]
                 anchor_ids = [t.status_id for t in tweets[:20] if t.status_id]
                 return UserFetchResult(
                     index=index,
                     username=username,
-                    instance=inst_cleaned,
+                    instance="FxTwitter",
                     tweets=tweets,
                     scanned_status_ids=scanned_ids,
                     anchor_status_ids=anchor_ids,
@@ -463,6 +464,7 @@ class SchedulerFetchMixin:
                     fetch_status=(
                         SourceStatus.SUCCESS if tweets else SourceStatus.EMPTY
                     ),
+                    host_attempts=["FxTwitter=成功"],
                 )
             except Exception as exc:
                 if backend == "fx":
@@ -473,12 +475,29 @@ class SchedulerFetchMixin:
                     return UserFetchResult(
                         index=index,
                         username=username,
+                        instance="FxTwitter",
+                        host_attempts=["FxTwitter=失败"],
                         error=SchedulerTaskError.from_exception(exc),
                     )
                 logger.warning(
                     f"[NitterTweets] FxTwitter 抓取 @{username} 异常，平滑回退自建 Nitter: "
                     f"{type(exc).__name__}: {sanitize_sensitive_text(str(exc))}"
                 )
+                fx_failed_attempt = "FxTwitter=失败"
+
+        def _with_fx_fallback(res: UserFetchResult) -> UserFetchResult:
+            if fx_failed_attempt:
+                nitter_attempt = (
+                    f"{res.instance or 'Nitter'}=成功"
+                    if not res.error
+                    else f"{res.instance or 'Nitter'}=失败"
+                )
+                res.host_attempts = [
+                    fx_failed_attempt,
+                    *(res.host_attempts or [nitter_attempt]),
+                ]
+            return res
+
         try:
             # /<user>/media/rss shows only the author's own media uploads
             # and excludes ALL retweets.  Only switch to it when both
@@ -529,17 +548,19 @@ class SchedulerFetchMixin:
                         filter_reposts=filter_reposts,
                     )
                     if html_result is not None:
-                        return html_result
-                return UserFetchResult(
-                    index=index,
-                    username=username,
-                    instance=instance,
-                    tweets=tweets,
-                    scanned_status_ids=list(scan_result.scanned_status_ids),
-                    anchor_status_ids=anchor_status_ids,
-                    latest_status_id=str(scan_result.latest_status_id or ""),
-                    scan_complete=bool(scan_result.complete),
-                    plain_text_filtered=int(scan_result.plain_text_filtered or 0),
+                        return _with_fx_fallback(html_result)
+                return _with_fx_fallback(
+                    UserFetchResult(
+                        index=index,
+                        username=username,
+                        instance=instance,
+                        tweets=tweets,
+                        scanned_status_ids=list(scan_result.scanned_status_ids),
+                        anchor_status_ids=anchor_status_ids,
+                        latest_status_id=str(scan_result.latest_status_id or ""),
+                        scan_complete=bool(scan_result.complete),
+                        plain_text_filtered=int(scan_result.plain_text_filtered or 0),
+                    )
                 )
 
             if concurrent:
@@ -576,7 +597,7 @@ class SchedulerFetchMixin:
                     filter_reposts=filter_reposts,
                 )
                 if html_result is not None:
-                    return html_result
+                    return _with_fx_fallback(html_result)
         except Exception as exc:
             html_result = await self._fetch_user_html_after_rss(
                 index,
@@ -586,23 +607,29 @@ class SchedulerFetchMixin:
                 filter_reposts=filter_reposts,
             )
             if html_result is not None:
-                return html_result
-            return UserFetchResult(
+                return _with_fx_fallback(html_result)
+            return _with_fx_fallback(
+                UserFetchResult(
+                    index=index,
+                    username=username,
+                    error=SchedulerTaskError.from_exception(exc),
+                )
+            )
+        return _with_fx_fallback(
+            UserFetchResult(
                 index=index,
                 username=username,
-                error=SchedulerTaskError.from_exception(exc),
+                instance=instance,
+                tweets=tweets,
+                scanned_status_ids=[
+                    tweet.status_id for tweet in tweets if tweet.status_id
+                ],
+                anchor_status_ids=[
+                    tweet.status_id for tweet in tweets[:20] if tweet.status_id
+                ],
+                latest_status_id=(tweets[0].status_id if tweets else ""),
+                plain_text_filtered=plain_text_filtered,
             )
-        return UserFetchResult(
-            index=index,
-            username=username,
-            instance=instance,
-            tweets=tweets,
-            scanned_status_ids=[tweet.status_id for tweet in tweets if tweet.status_id],
-            anchor_status_ids=[
-                tweet.status_id for tweet in tweets[:20] if tweet.status_id
-            ],
-            latest_status_id=(tweets[0].status_id if tweets else ""),
-            plain_text_filtered=plain_text_filtered,
         )
 
     def _effective_filter_reposts(self, group: ScheduleGroup) -> bool:
@@ -692,6 +719,7 @@ class SchedulerFetchMixin:
 
         backend = self.fetch_backend
         fx_client = self._get_fxtwitter_client()
+        fx_failed_attempt: str | None = None
 
         if backend in ("mix", "fx") and fx_client is not None:
             try:
@@ -714,22 +742,17 @@ class SchedulerFetchMixin:
                 tweets, plain_text_filtered = self._filter_html_tweets_plain_text(
                     tweets, skip_plain_text=skip_plain_text
                 )
-                inst = getattr(fx_client, "base_url", "https://api.fxtwitter.com")
-                inst_cleaned = (
-                    inst.replace("https://", "").replace("http://", "").rstrip("/")
-                    or "api.fxtwitter.com"
-                )
                 scanned_ids = [t.status_id for t in tweets if t.status_id]
                 anchor_ids = [t.status_id for t in tweets[:20] if t.status_id]
                 self._log_verbose_info(
                     f"[NitterTweets] FxTwitter 搜索订阅抓取成功: group={group.group_id}, "
-                    f"source={source_label}, instance={inst_cleaned}, "
+                    f"source={source_label}, instance=FxTwitter, "
                     f"tweets={len(tweets)}"
                 )
                 return UserFetchResult(
                     index=index,
                     username=account_key,
-                    instance=inst_cleaned,
+                    instance="FxTwitter",
                     tweets=tweets,
                     scanned_status_ids=scanned_ids,
                     anchor_status_ids=anchor_ids,
@@ -740,6 +763,7 @@ class SchedulerFetchMixin:
                     fetch_status=(
                         SourceStatus.SUCCESS if tweets else SourceStatus.EMPTY
                     ),
+                    host_attempts=["FxTwitter=成功"],
                 )
             except Exception as exc:
                 if backend == "fx":
@@ -750,6 +774,8 @@ class SchedulerFetchMixin:
                     return UserFetchResult(
                         index=index,
                         username=account_key,
+                        instance="FxTwitter",
+                        host_attempts=["FxTwitter=失败"],
                         error=SchedulerTaskError.from_exception(exc),
                     )
                 logger.warning(
@@ -757,8 +783,9 @@ class SchedulerFetchMixin:
                     f"group={group.group_id}, source={source_label}, "
                     f"error={type(exc).__name__}: {sanitize_sensitive_text(str(exc))}"
                 )
+                fx_failed_attempt = "FxTwitter=失败"
 
-        return await self._fetch_group_tag_html(
+        res = await self._fetch_group_tag_html(
             group,
             index,
             account_key,
@@ -769,6 +796,17 @@ class SchedulerFetchMixin:
             filter_reposts=filter_reposts,
             scan_watermark=scan_watermark,
         )
+        if fx_failed_attempt:
+            nitter_attempt = (
+                f"{res.instance or 'Nitter'}=成功"
+                if not res.error
+                else f"{res.instance or 'Nitter'}=失败"
+            )
+            res.host_attempts = [
+                fx_failed_attempt,
+                *(res.host_attempts or [nitter_attempt]),
+            ]
+        return res
 
     async def _fetch_group_query(
         self,
