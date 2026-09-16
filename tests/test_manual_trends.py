@@ -144,7 +144,7 @@ class TestManualTrendsCommand:
         logged_tasks: list[dict] = []
         monkeypatch.setattr(
             host,
-            "_log_manual_send_task",
+            "_log_manual_no_send_task",
             lambda title, **kwargs: logged_tasks.append({"title": title, **kwargs}),
         )
 
@@ -157,8 +157,7 @@ class TestManualTrendsCommand:
         assert "暂无数据" in msg or "失败" in msg
 
         assert len(logged_tasks) == 1
-        assert logged_tasks[0]["tweet_count"] == 0
-        assert logged_tasks[0]["sent_count"] == 0
+        assert logged_tasks[0]["status"] == "无数据"
 
     @pytest.mark.asyncio
     async def test_cmd_tweet_trends_exception_fallback(self, monkeypatch):
@@ -170,7 +169,7 @@ class TestManualTrendsCommand:
         logged_tasks: list[dict] = []
         monkeypatch.setattr(
             host,
-            "_log_manual_send_task",
+            "_log_manual_no_send_task",
             lambda title, **kwargs: logged_tasks.append({"title": title, **kwargs}),
         )
 
@@ -184,7 +183,7 @@ class TestManualTrendsCommand:
         assert "失败" in msg or "暂无数据" in msg
 
         assert len(logged_tasks) == 1
-        assert logged_tasks[0]["sent_count"] == 0
+        assert logged_tasks[0]["status"] == "无数据"
 
 
 class TestPluginCommandRegistration:

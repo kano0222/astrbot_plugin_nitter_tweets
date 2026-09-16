@@ -295,6 +295,26 @@ class TestFxTwitterClientSearch:
         assert len(tweets) == 2
         assert next_cursor == "next_page_cursor"
 
+    def test_search_tweets_supports_feed_parameter(self, monkeypatch):
+        client = FxTwitterClient()
+        requested_urls: list[str] = []
+
+        sample_data = {
+            "code": 200,
+            "results": [],
+            "cursor": {"top": None, "bottom": None},
+        }
+
+        def mock_fetch_json(url: str, **kwargs):
+            requested_urls.append(url)
+            return sample_data
+
+        monkeypatch.setattr(client, "_fetch_json", mock_fetch_json)
+
+        client.search_tweets("SpaceX", feed="top")
+        assert len(requested_urls) == 1
+        assert "feed=top" in requested_urls[0]
+
     def test_search_tweets_is_media_appends_filter(self, monkeypatch):
         client = FxTwitterClient()
         requested_urls: list[str] = []

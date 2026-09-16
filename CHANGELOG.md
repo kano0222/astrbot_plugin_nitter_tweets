@@ -19,6 +19,12 @@
 - **转推守卫机制（Retweet Guard）**：针对 `filter_reposts_enabled=false`（用户想保留转推）场景，避免 FxTwitter `media` 专线端点在服务端将转推丢弃；转推保留时强制抓取 `statuses` 时间线全量推文并在本地过滤纯文本，确保转推中的图片与视频媒体不丢失。
 - **Tag 搜索 SafeSearch 404 平滑回退**：FxTwitter 搜索接口默认启用 SafeSearch，对于敏感或成人向标签推文可能直接返回 404；在 `mix` 模式下识别 404 / 限流等异常并自动无缝回退至自建 Nitter HTML 搜索，确保订阅推文不遗漏，且失败日志经过敏感信息脱敏处理。
 
+### Fixed
+
+- 修复手动搜索在 FxTwitter 链路上未传递 `sort` 排序模式的问题；现在 `-top` 与 `-last` 均能精准透传 `feed` 参数或在 `mix` 模式下自动路由回退至自建 Nitter。
+- 修复手动查推与热搜无数据或异常分支下的任务审计日志，统一采用 `_log_manual_no_send_task`，并对异常信息和用户名全面执行 `sanitize_sensitive_text` 脱敏。
+- 对齐并精简 `docs/project/configuration.md` 与 `docs/advanced.md` 中关于 `send_batch_summary_enabled`、Tag 分组 `fetch_backend` 模式以及 List 物理隔离的文档说明。
+
 ## [1.5.0] - 2026-09-15
 
 > **💡 1.5.0 运维与配置建议**：

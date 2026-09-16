@@ -641,6 +641,29 @@ async def test_manual_cmd_tweet_pic_search_passes_is_media():
     mock_fx.search_tweets.assert_called_once()
     call_kwargs = mock_fx.search_tweets.call_args[1]
     assert call_kwargs.get("is_media") is True
+    assert call_kwargs.get("feed") == "latest"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_search_passes_top_feed():
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    tw = _make_tweet("pic", "8888")
+    mock_fx.search_tweets = MagicMock(return_value=([tw], None))
+
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_top_search"
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweet_search_impl(event, "#news 2 -top")
+
+    mock_fx.search_tweets.assert_called_once()
+    call_kwargs = mock_fx.search_tweets.call_args[1]
+    assert call_kwargs.get("feed") == "top"
 
 
 # ==============================================================================

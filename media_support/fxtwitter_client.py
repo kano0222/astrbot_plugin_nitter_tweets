@@ -11,7 +11,11 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 try:
-    from ..shared.utils import TweetItem, format_tweet_published
+    from ..shared.observability import sanitize_sensitive_text
+    from ..shared.utils import (
+        TweetItem,
+        format_tweet_published,
+    )
     from .network import build_request_headers, safe_urlopen
     from .status_resolve import _extract_status_text, _media_from_fxtwitter
 except ImportError:
@@ -20,7 +24,11 @@ except ImportError:
         _extract_status_text,
         _media_from_fxtwitter,
     )
-    from shared.utils import TweetItem, format_tweet_published
+    from shared.observability import sanitize_sensitive_text
+    from shared.utils import (
+        TweetItem,
+        format_tweet_published,
+    )
 
 logger = logging.getLogger("astrbot")
 
@@ -233,6 +241,7 @@ class FxTwitterClient:
         count: int = 10,
         is_media: bool = False,
         cursor: str | None = None,
+        feed: str = "latest",
     ) -> tuple[list[TweetItem], str | None]:
         q = query.strip()
         if not q:
@@ -243,7 +252,7 @@ class FxTwitterClient:
 
         params: dict[str, Any] = {
             "q": q,
-            "feed": "latest",
+            "feed": str(feed or "latest").strip().lower(),
             "count": max(1, min(count, 100)),
         }
         if cursor:
@@ -271,7 +280,9 @@ class FxTwitterClient:
         try:
             data = self._fetch_json(url, timeout=timeout)
         except Exception as exc:
-            logger.warning(f"[NitterTweets] 获取 Twitter 趋势失败: {exc}")
+            logger.warning(
+                f"[NitterTweets] 获取 Twitter 趋势失败: {sanitize_sensitive_text(str(exc))}"
+            )
             return []
 
         raw_trends = data.get("trends")

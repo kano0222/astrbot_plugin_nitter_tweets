@@ -238,7 +238,7 @@ class ManualCommandMixin:
                     )
                 except Exception as exc:
                     logger.warning(
-                        f"[NitterTweets] 手动获取 @{username} 推文失败: {exc}"
+                        f"[NitterTweets] 手动获取 @{sanitize_sensitive_text(username)} 推文失败: {sanitize_sensitive_text(str(exc))}"
                     )
                     self._log_manual_no_send_task(
                         "推文查询失败",
@@ -246,7 +246,7 @@ class ManualCommandMixin:
                         source=f"@{username}",
                         started=started,
                         status="抓取失败",
-                        error_detail=str(exc),
+                        error_detail=sanitize_sensitive_text(str(exc)),
                         warning=True,
                     )
                     await event.send(
@@ -408,6 +408,7 @@ class ManualCommandMixin:
                     query,
                     count=fetch_limit,
                     is_media=is_media_search,
+                    feed=("top" if sort == "top" else "latest"),
                 )
                 inst = getattr(fx, "base_url", "https://api.fxtwitter.com")
                 instance = (
@@ -427,13 +428,13 @@ class ManualCommandMixin:
                         source=query,
                         started=search_started,
                         status="抓取失败",
-                        error_detail=str(exc),
+                        error_detail=sanitize_sensitive_text(str(exc)),
                         warning=True,
                     )
                     await event.send(event.plain_result("搜索失败，请稍后重试"))
                     return
                 logger.warning(
-                    f"[NitterTweets] FxTwitter 搜索「{query}」异常，平滑回退自建 Nitter: {sanitize_sensitive_text(str(exc))}"
+                    f"[NitterTweets] FxTwitter 搜索「{sanitize_sensitive_text(query)}」异常，平滑回退自建 Nitter: {sanitize_sensitive_text(str(exc))}"
                 )
 
         if backend == "nitter" or (
@@ -456,14 +457,16 @@ class ManualCommandMixin:
                         sort=sort or None,
                     )
                 except Exception as exc:
-                    logger.warning(f"[NitterTweets] 搜索失败 query={query!r}: {exc}")
+                    logger.warning(
+                        f"[NitterTweets] 搜索失败 query={sanitize_sensitive_text(query)!r}: {sanitize_sensitive_text(str(exc))}"
+                    )
                     self._log_manual_no_send_task(
                         "推文搜索失败",
                         operation="tweet_search",
                         source=query,
                         started=search_started,
                         status="抓取失败",
-                        error_detail=str(exc),
+                        error_detail=sanitize_sensitive_text(str(exc)),
                         warning=True,
                     )
                     await event.send(
@@ -471,14 +474,16 @@ class ManualCommandMixin:
                     )
                     return
             except Exception as exc:
-                logger.warning(f"[NitterTweets] 搜索失败 query={query!r}: {exc}")
+                logger.warning(
+                    f"[NitterTweets] 搜索失败 query={sanitize_sensitive_text(query)!r}: {sanitize_sensitive_text(str(exc))}"
+                )
                 self._log_manual_no_send_task(
                     "推文搜索失败",
                     operation="tweet_search",
                     source=query,
                     started=search_started,
                     status="抓取失败",
-                    error_detail=str(exc),
+                    error_detail=sanitize_sensitive_text(str(exc)),
                     warning=True,
                 )
                 await event.send(
@@ -744,14 +749,14 @@ class ManualCommandMixin:
             trends = []
 
         if not trends:
-            self._log_manual_send_task(
+            self._log_manual_no_send_task(
                 "推特热搜查询",
                 operation="trends",
                 source="trends",
                 instance="api.fxtwitter.com",
-                tweet_count=0,
-                sent_count=0,
                 started=started,
+                status="无数据",
+                warning=True,
             )
             await event.send(
                 event.plain_result(
@@ -766,7 +771,9 @@ class ManualCommandMixin:
             await event.send(event.plain_result(formatted_text))
             sent = len(trends)
         except Exception as exc:
-            logger.warning(f"[NitterTweets] 发送推特热搜失败: {exc}")
+            logger.warning(
+                f"[NitterTweets] 发送推特热搜失败: {sanitize_sensitive_text(str(exc))}"
+            )
         finally:
             self._log_manual_send_task(
                 "推特热搜查询",

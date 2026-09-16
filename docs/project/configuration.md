@@ -22,24 +22,13 @@ AstrBot WebUI 的 `tweet_groups` 添加时先选 **博主分组**（`blogger`）
 | `fetch_backend`（`basic`） | 推文抓取后端策略 | 可选 `mix`（默认）、`nitter`、`fx`。控制博主与标签推文优先从 FxTwitter 还是自建 Nitter 拉取。 |
 | `instances`（`basic`） | RSS、HTML 搜索、List RSS | 仅填写自建 Nitter，可配多个；无默认公共实例 |
 
-### `fetch_backend` 抓取后端策略原理
+### `fetch_backend` 抓取后端策略
 
-- **`mix`（混合容灾模式，默认推荐）**：
-  - **原理**：博主推文和标签搜索优先调用 FxTwitter API 高速并发拉取；当 FxTwitter 返回超时、HTTP 429 限流或 404（如 SafeSearch 拦截）时，调度器与手动命令将拉取失败的博主/查询增量移交自建 Nitter 实例接盘。
-  - **优缺点**：拉取极速、元数据完整，极大减轻自建 Nitter 压力；兼备自建 Nitter 容灾保底。
-- **`nitter`（纯自建 Nitter 模式）**：
-  - **原理**：完全使用自建 Nitter 实例的 RSS 与 HTML 搜索管道，与历史版本行为一致，不调用 FxTwitter。
-  - **优缺点**：100% 本地自托管，无第三方公共 API 依赖；但对自建 Nitter 稳定度和账号池要求高，高频下易触发 429。
-- **`fx`（纯 FxTwitter 模式）**：
-  - **原理**：博主推文和标签搜索全部走 FxTwitter API，失败时不向自建 Nitter 回退。
-  - **优缺点**：无需自建和维护 Nitter 容器与 Redis；但完全依赖外部服务可用性，且 List 分组仍硬性走 Nitter。
-- **List 物理隔离锁定说明**：
-  - FxTwitter 原生不提供 Twitter List 端点。
-  - 无论全局 `fetch_backend` 设置为 `mix`、`nitter` 还是 `fx`，所有 `group_type: list` 的分组调度检查**严格物理锁定走自建 Nitter 管道**（List RSS 优先，失败平滑回退 HTML 翻页），绝对不调用 FxTwitter。
-- **转推守卫机制（Retweet Guard）**：
-  - 在 `filter_reposts_enabled=false`（保留转推）场景下，为避免 FxTwitter `/media` 相册端点在推特服务端丢弃转推，强制走 `statuses` 时间线端点拉取全量推文并在本地进行纯文本过滤，确保转推媒体不丢失。
-- **Tag SafeSearch 404 平滑回退**：
-  - FxTwitter 搜索默认开启推特 SafeSearch，敏感/成人向检索会直接返回 404；`mix` 模式识别 404 异常并自动无缝回退至自建 Nitter HTML 搜索，确保推文不遗漏。
+- `mix`（默认，推荐）：博主推文与标签搜索优先调用 FxTwitter API 高速并发拉取；遇超时、429 限流或 404（SafeSearch 拦截）时增量移交自建 Nitter 接盘。
+- `nitter`：完全使用自建 Nitter 实例的 RSS 与 HTML 搜索管道，不依赖第三方公共 API。
+- `fx`：博主与标签搜索仅走 FxTwitter API，失败时不向自建 Nitter 回退。
+
+> **详细原理与架构约束**（包括 List 物理隔离、转推守卫 Retweet Guard、Tag SafeSearch 回退等细节）：参见 [进阶说明 - 抓取后端策略](../advanced.md#抓取后端策略fetch_backend)。
 
 同一自建实例同时承担 RSS 和 HTML。旧版 `search_instances`、`blogger_html_instances`、`concurrent_fetch_instances` 已删除，仅在启动日志中提示，不读取、不迁移、不写回。
 
@@ -59,7 +48,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 - `name`: 显示名，可用于命令。
 - `group_id`: 存储 ID。新建默认分组为 `default`；由插件自动分配并保持稳定，已有值（包括旧 `global`）保留。缺失时，安全英文数字分组名会作为旧 ID 继承，否则自动补齐为 `group_N`。
-- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag 组通过 HTML 搜索；List 组优先走 RSS（`/i/lists/<id>/rss`），失败回退 HTML 翻页。
+- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag 组抓取由 `fetch_backend` 决定，`mix` 和 `fx` 模式优先走 FxTwitter，并在需要时回退至 Nitter HTML 搜索；List 组物理隔离强制走自建 Nitter（优先走 RSS `/i/lists/<id>/rss`，失败回退 HTML 翻页）。
 - `enabled`: 是否启用。
 - `watch_users`: **Blogger 组**博主订阅源；其他类型忽略。
 - `watch_queries`: **Tag 组**搜索订阅列表。**落盘为字符串列表**（如 `#圣娅`、`蔚蓝档案`）。前导 `#` → tag，否则 phrase；phrase 禁止自动加 `#`。仍可读旧 `{query,type}` 对象，但会规范成字符串，避免 AstrBot `list` 显示 `[object Object]`。
