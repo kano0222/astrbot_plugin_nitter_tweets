@@ -271,6 +271,177 @@ async def test_multi_blogger_single_failure_falls_back_to_single_nitter_fetch():
     assert len(results) == 2
 
 
+@pytest.mark.asyncio
+async def test_multi_blogger_first_failure_preserves_order_and_indices_single_nitter_fallback():
+    """When the first blogger fails on FX and subsequent succeed, results strictly preserve original order and indices."""
+    mock_nitter = MagicMock()
+    mock_nitter.fetch_merged_for_scheduler = AsyncMock()
+    mock_nitter.fetch_tweets_for_scheduler = AsyncMock(
+        return_value=(
+            "http://nitter.test",
+            SchedulerFetchResult(
+                tweets=[_make_tweet("alice", "1001")],
+                scanned_status_ids=["1001"],
+                complete=True,
+            ),
+        )
+    )
+
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+
+    def fx_fetch(username, count=10, **kw):
+        if username == "alice":
+            raise FxTwitterError("500 Server Error")
+        return [_make_tweet(username, "2001")], None
+
+    mock_fx.fetch_user_timeline = MagicMock(side_effect=fx_fetch)
+
+    runner = DummyRunner({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    group = _blogger_group(["alice", "bob", "carol"], filter_reposts=True)
+
+    results = await runner._fetch_group_users(
+        group, fetch_limit=10, skip_plain_text=False, scan_watermarks={}
+    )
+
+    assert len(results) == 3
+    # Order must strictly match original accounts list
+    assert [r.username for r in results] == ["alice", "bob", "carol"]
+    # Indices must strictly match 0, 1, 2
+    assert [r.index for r in results] == [0, 1, 2]
+    # First blogger fell back to Nitter
+    assert results[0].instance == "http://nitter.test"
+    assert results[0].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    # Subsequent bloggers succeeded on FX
+    assert results[1].instance == "FxTwitter"
+    assert results[1].host_attempts == ["FxTwitter=成功"]
+    assert results[2].instance == "FxTwitter"
+    assert results[2].host_attempts == ["FxTwitter=成功"]
+
+
+@pytest.mark.asyncio
+async def test_multi_blogger_first_failures_preserves_order_and_indices_merged_nitter_fallback():
+    """When first multiple bloggers fail on FX and fall back to merged Nitter, order and indices are preserved."""
+    mock_nitter = MagicMock()
+    mock_nitter.fetch_merged_for_scheduler = AsyncMock(
+        return_value=(
+            "http://nitter.test",
+            {
+                "alice": SchedulerFetchResult(
+                    tweets=[_make_tweet("alice", "1001")],
+                    scanned_status_ids=["1001"],
+                    complete=True,
+                ),
+                "bob": SchedulerFetchResult(
+                    tweets=[_make_tweet("bob", "2001")],
+                    scanned_status_ids=["2001"],
+                    complete=True,
+                ),
+            },
+        )
+    )
+    mock_nitter.fetch_tweets_for_scheduler = AsyncMock()
+
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+
+    def fx_fetch(username, count=10, **kw):
+        if username in ("alice", "bob"):
+            raise FxTwitterError("500 Server Error")
+        return [_make_tweet(username, "3001")], None
+
+    mock_fx.fetch_user_timeline = MagicMock(side_effect=fx_fetch)
+
+    runner = DummyRunner({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    group = _blogger_group(["alice", "bob", "carol"], filter_reposts=True)
+
+    results = await runner._fetch_group_users(
+        group, fetch_limit=10, skip_plain_text=False, scan_watermarks={}
+    )
+
+    assert len(results) == 3
+    assert [r.username for r in results] == ["alice", "bob", "carol"]
+    assert [r.index for r in results] == [0, 1, 2]
+    assert results[0].instance == "http://nitter.test"
+    assert results[0].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    assert results[1].instance == "http://nitter.test"
+    assert results[1].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    assert results[2].instance == "FxTwitter"
+    assert results[2].host_attempts == ["FxTwitter=成功"]
+
+
+@pytest.mark.asyncio
+async def test_multi_blogger_middle_failure_preserves_order_and_indices_single_nitter_fallback():
+    """When a middle blogger fails on FX and subsequent succeed, results strictly preserve order and indices."""
+    mock_nitter = MagicMock()
+    mock_nitter.fetch_merged_for_scheduler = AsyncMock()
+    mock_nitter.fetch_tweets_for_scheduler = AsyncMock(
+        return_value=(
+            "http://nitter.test",
+            SchedulerFetchResult(
+                tweets=[_make_tweet("bob", "2001")],
+                scanned_status_ids=["2001"],
+                complete=True,
+            ),
+        )
+    )
+
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+
+    def fx_fetch(username, count=10, **kw):
+        if username == "bob":
+            raise FxTwitterError("500 Server Error")
+        return [_make_tweet(username, "1001")], None
+
+    mock_fx.fetch_user_timeline = MagicMock(side_effect=fx_fetch)
+
+    runner = DummyRunner({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    group = _blogger_group(["alice", "bob", "carol"], filter_reposts=True)
+
+    results = await runner._fetch_group_users(
+        group, fetch_limit=10, skip_plain_text=False, scan_watermarks={}
+    )
+
+    assert len(results) == 3
+    assert [r.username for r in results] == ["alice", "bob", "carol"]
+    assert [r.index for r in results] == [0, 1, 2]
+    assert results[0].instance == "FxTwitter"
+    assert results[0].host_attempts == ["FxTwitter=成功"]
+    assert results[1].instance == "http://nitter.test"
+    assert results[1].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    assert results[2].instance == "FxTwitter"
+    assert results[2].host_attempts == ["FxTwitter=成功"]
+
+
+@pytest.mark.asyncio
+async def test_multi_blogger_first_failure_preserves_order_and_indices_fx_mode():
+    """In pure fx mode, if the first blogger fails, results list still preserves original order and indices."""
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+
+    def fx_fetch(username, count=10, **kw):
+        if username == "alice":
+            raise FxTwitterError("404 Not Found")
+        return [_make_tweet(username, "2001")], None
+
+    mock_fx.fetch_user_timeline = MagicMock(side_effect=fx_fetch)
+
+    runner = DummyRunner({"fetch_backend": "fx"}, mock_nitter, mock_fx)
+    group = _blogger_group(["alice", "bob"])
+
+    results = await runner._fetch_group_users(
+        group, fetch_limit=10, skip_plain_text=False, scan_watermarks={}
+    )
+
+    assert len(results) == 2
+    assert [r.username for r in results] == ["alice", "bob"]
+    assert [r.index for r in results] == [0, 1]
+    assert results[0].error is not None
+    assert results[1].error is None
+
+
 # ==============================================================================
 # 3. Multi-blogger: all fail on FX -> full fallback to Nitter
 # ==============================================================================
@@ -602,6 +773,222 @@ async def test_manual_cmd_tweets_fx_mode_does_not_fallback():
     mock_nitter.fetch_user.assert_not_called()
     sent_msgs = [call.args[0] for call in event.send.await_args_list]
     assert any("获取 @nasa 推文失败" in msg for msg in sent_msgs)
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_pic_mix_fx_success(monkeypatch):
+    """Verify /推图 passes is_media_only parameters to FX timeline and logs operation='user_media'."""
+    mock_nitter = MagicMock()
+    mock_nitter.fetch_user = AsyncMock()
+
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    mock_fx.fetch_user_timeline = MagicMock(
+        return_value=([_make_tweet("nasa", "1001")], None)
+    )
+
+    logged_tasks = []
+    monkeypatch.setattr(
+        "command_handlers.manual.safe_task_log",
+        lambda level, title, **kwargs: logged_tasks.append({"title": title, **kwargs}),
+    )
+
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweets_impl(event, "nasa", "5", is_media_only=True)
+
+    mock_fx.fetch_user_timeline.assert_called_once_with(
+        "nasa", count=5, skip_plain_text=True, filter_reposts=True
+    )
+    mock_nitter.fetch_user.assert_not_called()
+    assert len(logged_tasks) == 1
+    assert logged_tasks[0]["operation"] == "user_media"
+    assert logged_tasks[0]["source"] == "@nasa"
+    assert logged_tasks[0]["instance"] == "FxTwitter"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_pic_mix_fx_error_falls_back_to_nitter(monkeypatch):
+    """Verify /推图 falls back to Nitter with skip_plain_text=True and operation='user_media'."""
+    mock_nitter = MagicMock()
+    mock_nitter.fetch_user = AsyncMock(
+        return_value=("http://nitter.test", [_make_tweet("nasa", "1001")])
+    )
+
+    mock_fx = MagicMock()
+    mock_fx.fetch_user_timeline = MagicMock(
+        side_effect=FxTwitterNotFoundError("User not found 404")
+    )
+
+    logged_tasks = []
+    monkeypatch.setattr(
+        "command_handlers.manual.safe_task_log",
+        lambda level, title, **kwargs: logged_tasks.append({"title": title, **kwargs}),
+    )
+
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweets_impl(event, "nasa", "5", is_media_only=True)
+
+    mock_fx.fetch_user_timeline.assert_called_once_with(
+        "nasa", count=5, skip_plain_text=True, filter_reposts=True
+    )
+    mock_nitter.fetch_user.assert_called_once_with(
+        "nasa", 5, filter_reposts=False, skip_plain_text=True
+    )
+    assert len(logged_tasks) == 1
+    assert logged_tasks[0]["operation"] == "user_media"
+    assert logged_tasks[0]["source"] == "@nasa"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_pic_nitter_typeerror_fallback_filters_media(
+    monkeypatch,
+):
+    """Verify /推图 falls back to local media filter when nitter.fetch_user rejects skip_plain_text."""
+    media_tweet = TweetItem(
+        text="pic tweet",
+        link="https://x.com/nasa/status/1001",
+        published="2026-09-16 12:00:00",
+        media=[TweetMedia(kind="image", url="https://img.test/pic.jpg")],
+    )
+    plain_tweet = _make_tweet("nasa", "1002")
+
+    mock_nitter = MagicMock()
+
+    async def fake_fetch_user(username, limit, **kwargs):
+        if "skip_plain_text" in kwargs:
+            raise TypeError("unexpected keyword argument 'skip_plain_text'")
+        return "http://nitter.test", [media_tweet, plain_tweet]
+
+    mock_nitter.fetch_user = AsyncMock(side_effect=fake_fetch_user)
+
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    mock_fx.fetch_user_timeline = MagicMock(
+        side_effect=FxTwitterNotFoundError("User not found 404")
+    )
+
+    logged_tasks = []
+    monkeypatch.setattr(
+        "command_handlers.manual.safe_task_log",
+        lambda level, title, **kwargs: logged_tasks.append({"title": title, **kwargs}),
+    )
+
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    host._send_tweets_response = AsyncMock(return_value=1)
+    event = MagicMock()
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweets_impl(event, "nasa", "5", is_media_only=True)
+
+    assert mock_nitter.fetch_user.call_count == 2
+    host._send_tweets_response.assert_called_once()
+    sent_tweets = host._send_tweets_response.call_args[0][3]
+    assert len(sent_tweets) == 1
+    assert sent_tweets[0].status_id == "1001"
+
+
+@pytest.mark.asyncio
+async def test_nitter_service_fetch_user_skip_plain_text_html_fallback():
+    """Verify NitterService.fetch_user filters non-media tweets when falling back to HTML."""
+    from media_support.nitter import NitterService
+
+    service = NitterService({"instances": ["https://nitter.test"]})
+    service.fetch_tweets = AsyncMock(return_value=("https://nitter.test", []))
+    plain_tweet = _make_tweet("testuser", "1")
+    media_tweet = TweetItem(
+        text="media tweet",
+        link="https://x.com/testuser/status/2",
+        published="",
+        media=[TweetMedia(kind="image", url="https://img.test/pic.jpg")],
+    )
+    service.fetch_user_html = MagicMock(
+        return_value=("https://nitter.test", [plain_tweet, media_tweet])
+    )
+
+    used, tweets = await service.fetch_user("testuser", 5, skip_plain_text=True)
+    assert len(tweets) == 1
+    assert tweets[0].status_id == "2"
+    service.fetch_tweets.assert_called_once_with(
+        "testuser", 5, skip_plain_text=True, filter_reposts=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_pic_empty_message(monkeypatch):
+    """Verify /推图 returns correct empty message and logs operation='user_media' when no tweets found."""
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    mock_fx.fetch_user_timeline = MagicMock(return_value=([], None))
+
+    logged_tasks = []
+    monkeypatch.setattr(
+        "command_handlers.manual.safe_task_log",
+        lambda level, title, **kwargs: logged_tasks.append({"title": title, **kwargs}),
+    )
+
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweets_impl(event, "nasa", "5", is_media_only=True)
+
+    sent_msgs = [call.args[0] for call in event.send.await_args_list]
+    assert any("没有找到 @nasa 的相册媒体推文。" in msg for msg in sent_msgs)
+    assert len(logged_tasks) == 1
+    assert logged_tasks[0]["operation"] == "user_media"
+    assert logged_tasks[0]["result_status"] == "无公开推文"
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_pic_empty_username():
+    """Verify /推图 usage message when username is empty."""
+    host = DummyManualHost({"fetch_backend": "mix"}, MagicMock())
+    event = MagicMock()
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    await host._cmd_tweets_impl(event, "", "", is_media_only=True)
+
+    sent_msgs = [call.args[0] for call in event.send.await_args_list]
+    assert any("用法：/推图 用户名 [数量]" in msg for msg in sent_msgs)
+
+
+def test_cmd_tweet_pic_registered_on_plugin():
+    from main import NitterTweetsPlugin
+
+    assert hasattr(NitterTweetsPlugin, "cmd_tweet_pic")
+    cmd_fn = getattr(NitterTweetsPlugin, "cmd_tweet_pic")
+    assert callable(cmd_fn)
+    assert "用法：/推图 用户名 [数量]" in (cmd_fn.__doc__ or "")
+
+
+@pytest.mark.asyncio
+async def test_main_cmd_tweet_pic_delegates_to_impl():
+    from main import NitterTweetsPlugin
+
+    plugin = MagicMock(spec=NitterTweetsPlugin)
+    plugin._cmd_tweets_impl = AsyncMock()
+    event = MagicMock()
+
+    await NitterTweetsPlugin.cmd_tweet_pic(plugin, event, "nasa", "3")
+    plugin._cmd_tweets_impl.assert_called_once_with(
+        event, "nasa", "3", is_media_only=True
+    )
 
 
 # ==============================================================================

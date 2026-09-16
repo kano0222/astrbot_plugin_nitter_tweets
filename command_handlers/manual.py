@@ -160,14 +160,17 @@ class ManualCommandMixin:
         event: AstrMessageEvent,
         username: str = "",
         limit: str = "",
+        *,
+        is_media_only: bool = False,
     ):
-        """获取指定公开 X/Twitter 用户的最近推文。"""
+        """获取指定公开 X/Twitter 用户的最近推文或相册媒体推文。"""
         event.stop_event()
 
         username = normalize_username(username)
         if not username:
+            cmd = "/推图" if is_media_only else "/推文"
             await event.send(
-                event.plain_result("用法：/推文 用户名 [数量]\n例如：/推文 nasa 5")
+                event.plain_result(f"用法：{cmd} 用户名 [数量]\n例如：{cmd} nasa 5")
             )
             return
 
@@ -189,8 +192,9 @@ class ManualCommandMixin:
             requested_limit = self.default_limit
         limit = requested_limit
         self._mark_cooldown(event)
+        desc = "相册媒体推文" if is_media_only else "推文"
         await event.send(
-            event.plain_result(f"正在获取 @{username} 最近最多 {limit} 条推文...")
+            event.plain_result(f"正在获取 @{username} 最近最多 {limit} 条{desc}...")
         )
 
         started = time.perf_counter()
@@ -198,6 +202,7 @@ class ManualCommandMixin:
         instance = ""
         tweets = []
         fx_error: Exception | None = None
+        op_name = "user_media" if is_media_only else "user_timeline"
 
         fx = self._get_fxtwitter_client()
         if backend in ("mix", "fx") and fx is not None:
@@ -206,8 +211,8 @@ class ManualCommandMixin:
                     fx.fetch_user_timeline,
                     username,
                     count=int(limit),
-                    skip_plain_text=False,
-                    filter_reposts=False,
+                    skip_plain_text=is_media_only,
+                    filter_reposts=is_media_only,
                 )
                 instance = "FxTwitter"
                 tweets = fx_tweets
@@ -219,7 +224,7 @@ class ManualCommandMixin:
                     )
                     self._log_manual_no_send_task(
                         "推文查询失败",
-                        operation="user_timeline",
+                        operation=op_name,
                         source=f"@{username}",
                         instance="FxTwitter",
                         started=started,
@@ -242,17 +247,27 @@ class ManualCommandMixin:
                 self.nitter.begin_run_host_skip()
             try:
                 try:
+                    fetch_kwargs = {"filter_reposts": False}
+                    if is_media_only:
+                        fetch_kwargs["skip_plain_text"] = True
+                    nitter_inst, tweets = await self.nitter.fetch_user(
+                        username, limit, **fetch_kwargs
+                    )
+                    instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
+                except TypeError:
                     nitter_inst, tweets = await self.nitter.fetch_user(
                         username, limit, filter_reposts=False
                     )
                     instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
+                    if is_media_only and tweets:
+                        tweets = [t for t in tweets if bool(t.media)]
                 except Exception as exc:
                     logger.warning(
                         f"[NitterTweets] 手动获取 @{sanitize_sensitive_text(username)} 推文失败: {sanitize_sensitive_text(str(exc))}"
                     )
                     self._log_manual_no_send_task(
                         "推文查询失败",
-                        operation="user_timeline",
+                        operation=op_name,
                         source=f"@{username}",
                         instance=instance or "Nitter",
                         started=started,
@@ -273,19 +288,24 @@ class ManualCommandMixin:
         if not tweets:
             self._log_manual_no_send_task(
                 "推文查询完成",
-                operation="user_timeline",
+                operation=op_name,
                 source=f"@{username}",
                 instance=instance,
                 started=started,
                 status="无公开推文",
             )
-            await event.send(event.plain_result(f"没有找到 @{username} 的公开推文。"))
+            empty_msg = (
+                f"没有找到 @{username} 的相册媒体推文。"
+                if is_media_only
+                else f"没有找到 @{username} 的公开推文。"
+            )
+            await event.send(event.plain_result(empty_msg))
             return
 
         sent_count = await self._send_tweets_response(event, username, instance, tweets)
         self._log_manual_send_task(
             "推文查询完成",
-            operation="user_timeline",
+            operation=op_name,
             source=f"@{username}",
             instance=instance,
             tweet_count=len(tweets),

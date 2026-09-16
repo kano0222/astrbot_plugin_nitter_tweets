@@ -118,6 +118,7 @@ class SchedulerFetchMixin:
         # Blogger groups:
         backend = self.fetch_backend
         fx_client = self._get_fxtwitter_client()
+        account_to_original_index = {u: i for i, u in enumerate(accounts)}
 
         if backend in ("mix", "fx") and fx_client is not None:
             filter_reposts = self._effective_filter_reposts(group)
@@ -178,6 +179,9 @@ class SchedulerFetchMixin:
                     failed_accounts.append(username)
 
             if not failed_accounts:
+                fx_batches.sort(
+                    key=lambda r: account_to_original_index.get(r.username, r.index)
+                )
                 return fx_batches
 
             if backend == "fx":
@@ -185,7 +189,9 @@ class SchedulerFetchMixin:
                     if fetch_res is None:
                         fx_batches.append(
                             UserFetchResult(
-                                index=accounts.index(username),
+                                index=account_to_original_index.get(
+                                    username, accounts.index(username)
+                                ),
                                 username=username,
                                 instance="FxTwitter",
                                 host_attempts=["FxTwitter=失败"],
@@ -194,6 +200,9 @@ class SchedulerFetchMixin:
                                 ),
                             )
                         )
+                fx_batches.sort(
+                    key=lambda r: account_to_original_index.get(r.username, r.index)
+                )
                 return fx_batches
 
             # backend == "mix" and failed_accounts exists
@@ -215,15 +224,18 @@ class SchedulerFetchMixin:
                     skip_plain_text,
                     scan_watermarks,
                 )
+                for res in nitter_batches:
+                    res.index = account_to_original_index.get(res.username, res.index)
             else:
                 nitter_batches = []
                 for index, username in enumerate(failed_accounts):
                     if index > 0 and group.send_user_interval > 0:
                         await asyncio.sleep(group.send_user_interval)
+                    orig_idx = account_to_original_index.get(username, index)
                     nitter_batches.append(
                         await self._fetch_group_user(
                             group,
-                            index,
+                            orig_idx,
                             username,
                             fetch_limit,
                             skip_plain_text,
@@ -233,6 +245,7 @@ class SchedulerFetchMixin:
                         )
                     )
             for res in nitter_batches:
+                res.index = account_to_original_index.get(res.username, res.index)
                 nitter_attempt = (
                     f"{res.instance or 'Nitter'}=成功"
                     if not res.error
@@ -242,7 +255,11 @@ class SchedulerFetchMixin:
                     "FxTwitter=失败",
                     *(res.host_attempts or [nitter_attempt]),
                 ]
-            return fx_batches + nitter_batches
+            all_results = fx_batches + nitter_batches
+            all_results.sort(
+                key=lambda r: account_to_original_index.get(r.username, r.index)
+            )
+            return all_results
 
         # Blogger Nitter path (backend == "nitter" or fallback when fx_client is None)
         if len(accounts) > 1 and self._effective_filter_reposts(group):

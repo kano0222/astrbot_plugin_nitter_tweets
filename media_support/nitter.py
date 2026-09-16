@@ -71,6 +71,7 @@ class NitterService(NitterClient):
         limit: int = 5,
         *,
         filter_reposts: bool | None = None,
+        skip_plain_text: bool = False,
     ) -> tuple[str, list[TweetItem]]:
         """Fetch a user timeline using RSS first and HTML automatically."""
 
@@ -79,6 +80,7 @@ class NitterService(NitterClient):
             instance, tweets = await self.fetch_tweets(
                 username,
                 limit,
+                skip_plain_text=skip_plain_text,
                 filter_reposts=filter_reposts,
             )
             if tweets:
@@ -93,6 +95,8 @@ class NitterService(NitterClient):
                 limit,
                 filter_reposts=filter_reposts,
             )
+            if skip_plain_text and tweets:
+                tweets = [t for t in tweets if bool(t.media)]
         except Exception:
             if rss_error is not None:
                 raise rss_error
@@ -110,6 +114,7 @@ class NitterService(NitterClient):
         limit: int = 5,
         *,
         filter_reposts: bool | None = None,
+        skip_plain_text: bool = False,
     ) -> tuple[str, list[TweetItem]]:
         """Probe one instance with RSS first and automatic HTML fallback."""
         rss_error: Exception | None = None
@@ -118,6 +123,7 @@ class NitterService(NitterClient):
                 instance,
                 username,
                 limit,
+                skip_plain_text=skip_plain_text,
                 filter_reposts=filter_reposts,
             )
             if tweets:
@@ -132,6 +138,8 @@ class NitterService(NitterClient):
                 instance=instance,
                 filter_reposts=filter_reposts,
             )
+            if skip_plain_text and tweets:
+                tweets = [t for t in tweets if bool(t.media)]
         except Exception:
             if rss_error is not None:
                 raise rss_error

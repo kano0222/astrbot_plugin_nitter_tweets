@@ -210,6 +210,16 @@ class NitterTweetsPlugin(
         """查询指定公开 X/Twitter 用户最近推文。用法：/推文 用户名 [数量]"""
         return await self._cmd_tweets_impl(event, username, limit)
 
+    @filter.command("推图")
+    async def cmd_tweet_pic(
+        self,
+        event: AstrMessageEvent,
+        username: str = "",
+        limit: str = "",
+    ):
+        """查询指定公开 X/Twitter 用户最近相册媒体推文。用法：/推图 用户名 [数量]"""
+        return await self._cmd_tweets_impl(event, username, limit, is_media_only=True)
+
     @filter.command("推文搜索", alias={"tweetsearch"})
     async def cmd_tweet_search(self, event: AstrMessageEvent, args=GreedyStr):
         """搜索公开推文。标签请带 #，短语直接写。用法：/推文搜索 <query> [数量] [热门]"""

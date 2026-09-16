@@ -12,6 +12,7 @@
   - `fx`（纯 FxTwitter 模式）：博主与标签推文全部走 FxTwitter API，无需自建 Nitter 即可轻量运行（List 分组仍物理锁定 Nitter）。
 - 新增 `/推特热搜` 实时趋势榜单指令（别名 `/twitter热搜`、`/推文热搜`、`/推特趋势`）：获取 Twitter/X 实时趋势热搜榜，展示排名、话题名称与推文热度；内置指令冷却、审计日志并防御性兼容上游 rank 为 null 的异常数据。
 - 新增 `send_batch_summary_enabled` 配置项（`push` 组，默认 `true`，Close #74）：控制在非合并普通推送时是否发送批次概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，静音单独的概括横幅；QQ 合并转发整包发送不受影响。
+- 新增极简 `/推图` 指令（无冗余别名，用法 `/推图 用户名 [数量]`）：直连相册专线拉取指定公开用户的最新相册媒体推文（过滤纯文本与转推），支持自建 Nitter 平滑回退并记录 `user_media` 审计日志。
 
 ### Architecture & Defenses
 
@@ -21,6 +22,7 @@
 
 ### Fixed
 
+- 修复调度器在多博主抓取时（FxTwitter 部分失败增量回退至 Nitter 或纯 FxTwitter 模式部分失败），结果列表顺序打乱以及 `UserFetchResult.index` 未精准对齐原始 `accounts` 列表的缺陷；统一按原始账号顺序排序并精准保持索引一致。
 - 修复手动搜索在 FxTwitter 链路上未传递 `sort` 排序模式的问题；现在 `-top` 与 `-last` 均能精准透传 `feed` 参数或在 `mix` 模式下自动路由回退至自建 Nitter。
 - 修复手动查推与热搜无数据或异常分支下的任务审计日志，统一采用 `_log_manual_no_send_task`，并对异常信息和用户名全面执行 `sanitize_sensitive_text` 脱敏。
 - 对齐并精简 `docs/project/configuration.md` 与 `docs/advanced.md` 中关于 `send_batch_summary_enabled`、Tag 分组 `fetch_backend` 模式以及 List 物理隔离的文档说明。
