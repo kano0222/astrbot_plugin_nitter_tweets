@@ -12,6 +12,7 @@
   - `fx`（纯 FxTwitter 模式）：博主与标签推文全部走 FxTwitter API，无需自建 Nitter 即可轻量运行（List 分组仍物理锁定 Nitter）。
 - 新增 `/推特热搜` 实时趋势榜单指令（别名 `/twitter热搜`、`/推文热搜`、`/推特趋势`）：获取 Twitter/X 实时趋势热搜榜，展示排名、话题名称与推文热度；内置指令冷却、审计日志并防御性兼容上游 rank 为 null 的异常数据。
 - 新增 `send_batch_summary_enabled` 配置项（`push` 组，默认 `true`，Close #74）：控制在非合并普通推送时是否发送批次概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，静音单独的概括横幅；QQ 合并转发整包发送不受影响。
+- 新增 `forward_reject_plain_fallback_enabled` 配置项（`push` 组，默认 `false`）：控制在 QQ (OneBot/NapCat) 合并转发因平台内容风控（`retcode 1200 / res_id 失败`）被拒收时是否发送纯文本保底。默认关闭，遇风控直接略过违规推文并标记已读写入 `seen` 推进水位，杜绝群聊垃圾链接刷屏并防止下轮反复风控；开启后则发送纯文本链接兜底。
 - 新增极简 `/推图` 指令（无冗余别名，用法 `/推图 用户名 [数量]`）：直连相册专线拉取指定公开用户的最新相册媒体推文（过滤纯文本与转推），支持自建 Nitter 平滑回退并记录 `user_media` 审计日志。
 
 ### Architecture & Defenses

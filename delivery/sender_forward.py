@@ -21,10 +21,12 @@ except ImportError:
 
 try:
     from ..shared import TweetItem
+    from ..shared.observability import sanitize_sensitive_text
     from .outcomes import SendOutcome
 except ImportError:
     from delivery import SendOutcome
     from shared import TweetItem
+    from shared.observability import sanitize_sensitive_text
 
 
 class SenderForwardMixin:
@@ -693,6 +695,44 @@ class SenderForwardMixin:
                 warning=fallback.warning or split_warning,
                 delivery_status="partial_failed" if delivered else "failed",
                 delivery_error=error,
+                delivered_status_ids=self._dedupe_status_ids(delivered),
+            )
+
+        is_rejected = (
+            reject
+            or (
+                bool(split_error)
+                and self._is_forward_payload_rejected_error(Exception(str(split_error)))
+            )
+            or (
+                bool(fallback.error)
+                and self._is_forward_payload_rejected_error(
+                    Exception(str(fallback.error))
+                )
+            )
+        )
+        if is_rejected and not getattr(
+            self, "forward_reject_plain_fallback_enabled", False
+        ):
+            omitted_ids = self._status_ids_from_tweets(remaining)
+            delivered.extend(omitted_ids)
+            err_msg = (
+                getattr(fallback, "delivery_error", "")
+                or fallback.error
+                or split_error
+                or attempt.error
+            )
+            logger.warning(
+                f"[NitterTweets] 合并转发因内容风控被拒收 ({sanitize_sensitive_text(str(err_msg))})，"
+                f"跳过纯文本降级并标记已处理: {len(omitted_ids)} 条推文 (target={umo})"
+            )
+            return SendOutcome(
+                success=True,
+                mode="rejected_omitted",
+                error=err_msg,
+                warning="合并转发触发平台内容风控，已略过违规推文并标记已读",
+                delivery_status="partial_failed",
+                delivery_error=err_msg,
                 delivered_status_ids=self._dedupe_status_ids(delivered),
             )
 

@@ -256,6 +256,12 @@
         "default": 2,
         "hint": "QQ/aiocqhttp 目标在本次发送的新推文总数达到该值时启用 OneBot v11 Node/Nodes 合并转发；0 表示关闭，1 表示有新推文就合并，默认 2 表示 2 条及以上才合并。飞书/Lark、Telegram、微信 OC 和其他平台不受该阈值影响，始终使用普通逐订阅源发送。范围 0-20。"
       },
+      "forward_reject_plain_fallback_enabled": {
+        "description": "合并转发风控拒收时允许纯文本降级",
+        "type": "bool",
+        "default": false,
+        "hint": "当 QQ/OneBot 合并转发因内容风控（如 retcode 1200 / res_id 失败，常由敏感图片触发）被平台拒收时，是否降级发送一条包含所有推文链接的纯文本消息保底。默认关闭：直接跳过发送违规推文并将其标记为已读（写入 seen 推进水位），避免敏感链接打乱群聊体验且防止下一轮反复重试；开启后则会在风控拒收时向群内发送纯文本链接兜底。"
+      },
       "send_target_interval": {
         "description": "多目标发送间隔秒数",
         "type": "float",

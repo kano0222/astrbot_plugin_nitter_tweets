@@ -151,6 +151,7 @@ AstrBot 设置界面已按“基础、媒体、AI 翻译、后台检查、推送
 | --- | --- |
 | `send_batch_summary_enabled` | 非合并普通推送时是否发送概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”），默认开启（`true`）。关闭后仅逐条发送推文卡片，阻断发送单独的概括消息；QQ 合并转发整包发送时不使用本项。 |
 | `merge_tweet_threshold` | 私人号 OneBot 新推文总数达到多少条时启用合并转发；QQ Official 不使用该阈值；`0` 关闭，默认 `2`。 |
+| `forward_reject_plain_fallback_enabled` | 合并转发因内容风控（如 retcode 1200 / res_id 失败）被平台拒收时，是否降级发送纯文本链接消息保底。默认关闭（`false`）：跳过纯文本降级并直接标记已读写入 seen 推进水位，避免敏感链接在群聊刷屏并防止下一轮重复抓取风控；开启后则发送纯文本链接兜底。 |
 | `send_target_interval` | 同一订阅源发送到多个目标之间的发送间隔。 |
 | `send_user_interval` | 多个订阅源之间的发送间隔；Tag/List 查询抓取也按该间隔串行等待。 |
 | `manual_send_interval` | 手动 `/推文`、`/推文搜索`、`/镜像测试` 非合并转发时，逐条消息间隔（秒），默认 `0`；在平台适配前 sleep，多平台生效。 |

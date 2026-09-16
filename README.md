@@ -186,6 +186,7 @@ List 通过配置文件或 WebUI 添加 ID，暂无导入命令。
 | `media_transport_base64_max_mb` | 允许走 base64 的单文件上限，默认 8；默认值已把绝大多数视频排除在外 |
 | `translate_enabled` | 是否翻译 |
 | `merge_tweet_threshold` | 私人号 OneBot 合并转发条数阈值；QQ Official 不使用该阈值；`0` 关 |
+| `forward_reject_plain_fallback_enabled` | 合并转发被风控拒收时是否降级纯文本；默认 `false`（略过违规推文并标记已读）；`true` 允许纯文本链接保底 |
 
 实例架构与容错：[实例配置指南](./docs/instances-guide.md)。
 

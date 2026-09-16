@@ -24,7 +24,9 @@ except ImportError:
 
 try:
     from ..config import (
+        config_get,
         configured_merge_tweet_threshold,
+        parse_config_bool,
         resolve_send_image_attachments,
         resolve_send_video_attachments,
     )
@@ -41,7 +43,9 @@ try:
     from .sender_transport import SenderTransportMixin
 except ImportError:
     from config import (
+        config_get,
         configured_merge_tweet_threshold,
+        parse_config_bool,
         resolve_send_image_attachments,
         resolve_send_video_attachments,
     )
@@ -79,12 +83,17 @@ class TweetSender(
     # recursively split the tweet list and retry smaller merges.
     FORWARD_SPLIT_MIN_TWEETS = 1
     UNCERTAIN_DELIVERY_WARNING = "发送状态不确定，已跳过降级重试。"
+    forward_reject_plain_fallback_enabled: bool = False
 
     def __init__(self, config=None):
         config = config or {}
         self.send_image_attachments = resolve_send_image_attachments(config)
         self.send_video_attachments = resolve_send_video_attachments(config)
         self.merge_tweet_threshold = configured_merge_tweet_threshold(config)
+        self.forward_reject_plain_fallback_enabled = parse_config_bool(
+            config_get(config, "forward_reject_plain_fallback_enabled", False),
+            False,
+        )
         self.renderer = TweetMessageRenderer(
             send_image_attachments=self.send_image_attachments,
             send_video_attachments=self.send_video_attachments,
