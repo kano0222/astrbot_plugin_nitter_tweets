@@ -13,12 +13,14 @@ from astrbot.api import logger
 try:
     from ..config import config_get, parse_config_bool
     from ..media_support.client import NitterClient
+    from ..media_support.fxtwitter_client import FxTwitterClient
     from ..shared import TweetItem, format_subscription_source, sanitize_sensitive_text
     from .config import ScheduleGroup
     from .models import SchedulerTaskError, SourceStatus, UserFetchResult
 except ImportError:
     from config import config_get, parse_config_bool
     from media_support.client import NitterClient
+    from media_support.fxtwitter_client import FxTwitterClient
     from scheduler.config import ScheduleGroup
     from scheduler.models import SchedulerTaskError, SourceStatus, UserFetchResult
     from shared import TweetItem, format_subscription_source, sanitize_sensitive_text
@@ -56,6 +58,32 @@ def _classify_html_fetch(
 class SchedulerFetchMixin:
     """博主与标签的抓取入口。"""
 
+    @property
+    def fetch_backend(self) -> str:
+        return (
+            str(
+                config_get(getattr(self, "config", {}), "fetch_backend", "mix") or "mix"
+            )
+            .strip()
+            .lower()
+        )
+
+    def _get_fxtwitter_client(self) -> FxTwitterClient | None:
+        client = getattr(self, "fxtwitter", None)
+        if client is not None:
+            return client
+        client = getattr(getattr(self, "nitter", None), "fxtwitter", None)
+        if client is not None:
+            return client
+        if self.fetch_backend == "fx":
+            return FxTwitterClient()
+        if isinstance(getattr(self, "nitter", None), NitterClient):
+            return FxTwitterClient(timeout=getattr(self.nitter, "timeout", 15.0))
+        raw_backend = config_get(getattr(self, "config", {}), "fetch_backend", None)
+        if raw_backend and str(raw_backend).strip().lower() in ("mix", "fx"):
+            return FxTwitterClient()
+        return None
+
     async def _fetch_group_users(
         self,
         group: ScheduleGroup,
@@ -64,30 +92,11 @@ class SchedulerFetchMixin:
         scan_watermarks: dict[str, list[str]],
     ) -> list[UserFetchResult]:
         accounts = list(group.account_keys)
+        if not accounts:
+            return []
+
         # Tag/List groups always serial to protect shared HTML instances.
-        if (
-            group.is_tag_group
-            or group.is_list_group
-            or not self._should_use_concurrent_fetch(group)
-        ):
-            # Blogger serial path: try merged RSS to collapse N requests into
-            # ceil(N/batch) requests, fall back to per-user on failure.
-            # Skip merged when the user wants to keep retweets: the merged
-            # feed's author-based splitting drops retweets of outside accounts
-            # regardless of filter_reposts, so per-user RSS is required to
-            # preserve them.
-            if (
-                group.is_blogger_group
-                and len(accounts) > 1
-                and self._effective_filter_reposts(group)
-            ):
-                return await self._fetch_group_users_merged(
-                    group,
-                    accounts,
-                    fetch_limit,
-                    skip_plain_text,
-                    scan_watermarks,
-                )
+        if group.is_tag_group or group.is_list_group:
             results = []
             for index, username in enumerate(accounts):
                 # Add delay between queries (except before the first one)
@@ -106,6 +115,160 @@ class SchedulerFetchMixin:
                 )
             return results
 
+        # Blogger groups:
+        backend = self.fetch_backend
+        fx_client = self._get_fxtwitter_client()
+
+        if backend in ("mix", "fx") and fx_client is not None:
+            filter_reposts = self._effective_filter_reposts(group)
+            concurrency = (
+                max(1, group.fetch_concurrency) if group.fetch_concurrency else 3
+            )
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def fetch_one_fx(
+                index: int, username: str
+            ) -> tuple[str, UserFetchResult | None, Exception | None]:
+                async with semaphore:
+                    try:
+                        tweets, _ = await asyncio.to_thread(
+                            fx_client.fetch_user_timeline,
+                            username,
+                            count=fetch_limit,
+                            skip_plain_text=skip_plain_text,
+                            filter_reposts=filter_reposts,
+                        )
+                        inst = getattr(
+                            fx_client, "base_url", "https://api.fxtwitter.com"
+                        )
+                        inst_cleaned = (
+                            inst.replace("https://", "")
+                            .replace("http://", "")
+                            .rstrip("/")
+                            or "api.fxtwitter.com"
+                        )
+                        scanned_ids = [t.status_id for t in tweets if t.status_id]
+                        anchor_ids = [t.status_id for t in tweets[:20] if t.status_id]
+                        return (
+                            username,
+                            UserFetchResult(
+                                index=index,
+                                username=username,
+                                instance=inst_cleaned,
+                                tweets=tweets,
+                                scanned_status_ids=scanned_ids,
+                                anchor_status_ids=anchor_ids,
+                                latest_status_id=(
+                                    tweets[0].status_id if tweets else ""
+                                ),
+                                scan_complete=True,
+                                plain_text_filtered=0,
+                                fetch_status=(
+                                    SourceStatus.SUCCESS
+                                    if tweets
+                                    else SourceStatus.EMPTY
+                                ),
+                            ),
+                            None,
+                        )
+                    except Exception as exc:
+                        return (username, None, exc)
+
+            tasks = [fetch_one_fx(idx, u) for idx, u in enumerate(accounts)]
+            fx_results = await asyncio.gather(*tasks)
+
+            fx_batches: list[UserFetchResult] = []
+            failed_accounts: list[str] = []
+            for username, fetch_res, exc in fx_results:
+                if fetch_res is not None:
+                    fx_batches.append(fetch_res)
+                else:
+                    failed_accounts.append(username)
+
+            if not failed_accounts:
+                return fx_batches
+
+            if backend == "fx":
+                for username, fetch_res, exc in fx_results:
+                    if fetch_res is None:
+                        fx_batches.append(
+                            UserFetchResult(
+                                index=accounts.index(username),
+                                username=username,
+                                error=SchedulerTaskError.from_exception(
+                                    exc or RuntimeError("FxTwitter fetch failed")
+                                ),
+                            )
+                        )
+                return fx_batches
+
+            # backend == "mix" and failed_accounts exists
+            failed_preview = ", ".join(f"@{u}" for u in failed_accounts[:5])
+            if len(failed_accounts) > 5:
+                failed_preview += f" 等 {len(failed_accounts)} 位博主"
+            logger.warning(
+                f"[NitterTweets] FxTwitter 抓取异常平滑回退自建 Nitter: "
+                f"group={group.group_id}, 失败博主数={len(failed_accounts)} "
+                f"({sanitize_sensitive_text(failed_preview)})"
+            )
+
+            # Incremental takeover: only failed_accounts handed to Nitter pipeline
+            if len(failed_accounts) > 1 and self._effective_filter_reposts(group):
+                nitter_batches = await self._fetch_group_users_merged(
+                    group,
+                    failed_accounts,
+                    fetch_limit,
+                    skip_plain_text,
+                    scan_watermarks,
+                )
+            else:
+                nitter_batches = []
+                for index, username in enumerate(failed_accounts):
+                    if index > 0 and group.send_user_interval > 0:
+                        await asyncio.sleep(group.send_user_interval)
+                    nitter_batches.append(
+                        await self._fetch_group_user(
+                            group,
+                            index,
+                            username,
+                            fetch_limit,
+                            skip_plain_text,
+                            scan_watermarks.get(username),
+                            concurrent=False,
+                            force_nitter=True,
+                        )
+                    )
+            return fx_batches + nitter_batches
+
+        # Blogger Nitter path (backend == "nitter" or fallback when fx_client is None)
+        if len(accounts) > 1 and self._effective_filter_reposts(group):
+            return await self._fetch_group_users_merged(
+                group,
+                accounts,
+                fetch_limit,
+                skip_plain_text,
+                scan_watermarks,
+            )
+        if not self._should_use_concurrent_fetch(group):
+            results = []
+            for index, username in enumerate(accounts):
+                # Add delay between queries (except before the first one)
+                if index > 0 and group.send_user_interval > 0:
+                    await asyncio.sleep(group.send_user_interval)
+                results.append(
+                    await self._fetch_group_user(
+                        group,
+                        index,
+                        username,
+                        fetch_limit,
+                        skip_plain_text,
+                        scan_watermarks.get(username),
+                        concurrent=False,
+                        force_nitter=True,
+                    )
+                )
+            return results
+
         semaphore = asyncio.Semaphore(group.fetch_concurrency)
 
         async def fetch_with_limit(index: int, username: str) -> UserFetchResult:
@@ -118,6 +281,7 @@ class SchedulerFetchMixin:
                     skip_plain_text,
                     scan_watermarks.get(username),
                     concurrent=True,
+                    force_nitter=True,
                 )
 
         tasks = [
@@ -180,6 +344,7 @@ class SchedulerFetchMixin:
                             skip_plain_text,
                             scan_watermarks.get(username),
                             concurrent=False,
+                            force_nitter=True,
                         )
                     )
                     global_index += 1
@@ -221,6 +386,7 @@ class SchedulerFetchMixin:
                             skip_plain_text,
                             scan_watermarks.get(username),
                             concurrent=False,
+                            force_nitter=True,
                         )
                     )
                 global_index += 1
@@ -237,10 +403,11 @@ class SchedulerFetchMixin:
         scan_watermark: list[str] | None,
         *,
         concurrent: bool,
+        force_nitter: bool = False,
     ) -> UserFetchResult:
         filter_reposts = self._effective_filter_reposts(group)
         if group.is_tag_group:
-            return await self._fetch_group_query(
+            return await self._fetch_group_tag(
                 group,
                 index,
                 username,
@@ -259,6 +426,59 @@ class SchedulerFetchMixin:
                 skip_plain_text=skip_plain_text,
                 filter_reposts=filter_reposts,
             )
+
+        backend = self.fetch_backend
+        fx_client = self._get_fxtwitter_client()
+        if (
+            not force_nitter
+            and not concurrent
+            and backend in ("mix", "fx")
+            and fx_client is not None
+        ):
+            try:
+                tweets, _ = await asyncio.to_thread(
+                    fx_client.fetch_user_timeline,
+                    username,
+                    count=fetch_limit,
+                    skip_plain_text=skip_plain_text,
+                    filter_reposts=filter_reposts,
+                )
+                inst = getattr(fx_client, "base_url", "https://api.fxtwitter.com")
+                inst_cleaned = (
+                    inst.replace("https://", "").replace("http://", "").rstrip("/")
+                    or "api.fxtwitter.com"
+                )
+                scanned_ids = [t.status_id for t in tweets if t.status_id]
+                anchor_ids = [t.status_id for t in tweets[:20] if t.status_id]
+                return UserFetchResult(
+                    index=index,
+                    username=username,
+                    instance=inst_cleaned,
+                    tweets=tweets,
+                    scanned_status_ids=scanned_ids,
+                    anchor_status_ids=anchor_ids,
+                    latest_status_id=(tweets[0].status_id if tweets else ""),
+                    scan_complete=True,
+                    plain_text_filtered=0,
+                    fetch_status=(
+                        SourceStatus.SUCCESS if tweets else SourceStatus.EMPTY
+                    ),
+                )
+            except Exception as exc:
+                if backend == "fx":
+                    logger.warning(
+                        f"[NitterTweets] FxTwitter 抓取 @{username} 失败 (fx模式): "
+                        f"{type(exc).__name__}: {sanitize_sensitive_text(str(exc))}"
+                    )
+                    return UserFetchResult(
+                        index=index,
+                        username=username,
+                        error=SchedulerTaskError.from_exception(exc),
+                    )
+                logger.warning(
+                    f"[NitterTweets] FxTwitter 抓取 @{username} 异常，平滑回退自建 Nitter: "
+                    f"{type(exc).__name__}: {sanitize_sensitive_text(str(exc))}"
+                )
         try:
             # /<user>/media/rss shows only the author's own media uploads
             # and excludes ALL retweets.  Only switch to it when both
@@ -445,7 +665,7 @@ class SchedulerFetchMixin:
         kept = [tweet for tweet in tweets if tweet.media]
         return kept, len(tweets) - len(kept)
 
-    async def _fetch_group_query(
+    async def _fetch_group_tag(
         self,
         group: ScheduleGroup,
         index: int,
@@ -470,6 +690,120 @@ class SchedulerFetchMixin:
             )
         source_label = format_subscription_source(account_key, group.group_type)
 
+        backend = self.fetch_backend
+        fx_client = self._get_fxtwitter_client()
+
+        if backend in ("mix", "fx") and fx_client is not None:
+            try:
+                self._log_verbose_info(
+                    f"[NitterTweets] FxTwitter 搜索订阅抓取开始: group={group.group_id}, "
+                    f"source={source_label}, type={query_item.type}, limit={fetch_limit}"
+                )
+                effective_query = query_item.query
+                tweets, _ = await asyncio.to_thread(
+                    fx_client.search_tweets,
+                    effective_query,
+                    count=fetch_limit,
+                    is_media=skip_plain_text,
+                )
+                retweet_filtered = 0
+                if filter_reposts:
+                    orig_len = len(tweets)
+                    tweets = [t for t in tweets if not t.is_retweet]
+                    retweet_filtered = orig_len - len(tweets)
+                tweets, plain_text_filtered = self._filter_html_tweets_plain_text(
+                    tweets, skip_plain_text=skip_plain_text
+                )
+                inst = getattr(fx_client, "base_url", "https://api.fxtwitter.com")
+                inst_cleaned = (
+                    inst.replace("https://", "").replace("http://", "").rstrip("/")
+                    or "api.fxtwitter.com"
+                )
+                scanned_ids = [t.status_id for t in tweets if t.status_id]
+                anchor_ids = [t.status_id for t in tweets[:20] if t.status_id]
+                self._log_verbose_info(
+                    f"[NitterTweets] FxTwitter 搜索订阅抓取成功: group={group.group_id}, "
+                    f"source={source_label}, instance={inst_cleaned}, "
+                    f"tweets={len(tweets)}"
+                )
+                return UserFetchResult(
+                    index=index,
+                    username=account_key,
+                    instance=inst_cleaned,
+                    tweets=tweets,
+                    scanned_status_ids=scanned_ids,
+                    anchor_status_ids=anchor_ids,
+                    latest_status_id=(tweets[0].status_id if tweets else ""),
+                    scan_complete=True,
+                    plain_text_filtered=plain_text_filtered,
+                    retweet_filtered=retweet_filtered,
+                    fetch_status=(
+                        SourceStatus.SUCCESS if tweets else SourceStatus.EMPTY
+                    ),
+                )
+            except Exception as exc:
+                if backend == "fx":
+                    logger.warning(
+                        f"[NitterTweets] FxTwitter 搜索订阅抓取失败 (fx模式): group={group.group_id}, "
+                        f"source={source_label}, error={type(exc).__name__}: {sanitize_sensitive_text(str(exc))}"
+                    )
+                    return UserFetchResult(
+                        index=index,
+                        username=account_key,
+                        error=SchedulerTaskError.from_exception(exc),
+                    )
+                logger.warning(
+                    f"[NitterTweets] FxTwitter 标签搜索抓取异常，平滑回退自建 Nitter HTML: "
+                    f"group={group.group_id}, source={source_label}, "
+                    f"error={type(exc).__name__}: {sanitize_sensitive_text(str(exc))}"
+                )
+
+        return await self._fetch_group_tag_html(
+            group,
+            index,
+            account_key,
+            query_item,
+            source_label,
+            fetch_limit,
+            skip_plain_text=skip_plain_text,
+            filter_reposts=filter_reposts,
+            scan_watermark=scan_watermark,
+        )
+
+    async def _fetch_group_query(
+        self,
+        group: ScheduleGroup,
+        index: int,
+        account_key: str,
+        fetch_limit: int,
+        *,
+        skip_plain_text: bool = False,
+        filter_reposts: bool = True,
+        scan_watermark: list[str] | None = None,
+    ) -> UserFetchResult:
+        return await self._fetch_group_tag(
+            group,
+            index,
+            account_key,
+            fetch_limit,
+            skip_plain_text=skip_plain_text,
+            filter_reposts=filter_reposts,
+            scan_watermark=scan_watermark,
+        )
+
+    async def _fetch_group_tag_html(
+        self,
+        group: ScheduleGroup,
+        index: int,
+        account_key: str,
+        query_item,
+        source_label: str,
+        fetch_limit: int,
+        *,
+        skip_plain_text: bool = False,
+        filter_reposts: bool = True,
+        scan_watermark: list[str] | None = None,
+    ) -> UserFetchResult:
         self._log_verbose_info(
             f"[NitterTweets] 搜索订阅抓取开始: group={group.group_id}, "
             f"source={source_label}, type={query_item.type}, limit={fetch_limit}"

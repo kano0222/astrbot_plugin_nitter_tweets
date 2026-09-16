@@ -12,9 +12,11 @@ from astrbot.core.star.filter.command import GreedyStr
 try:
     from ..ai import format_ai_tweet_summary
     from ..config import (
+        config_get,
         resolve_hide_original_when_translated,
         resolve_manual_send_interval,
     )
+    from ..media_support.client import NitterClient
     from ..media_support.fxtwitter_client import FxTwitterClient
     from ..media_support.html_backend.query import MAX_QUERY_LENGTH
     from ..media_support.network import UnsafeUrlError, validate_http_url
@@ -24,14 +26,16 @@ try:
         SearchSessionStore,
     )
     from ..rendering.tweets import format_twitter_trends
-    from ..shared import normalize_username, safe_call
+    from ..shared import normalize_username, safe_call, sanitize_sensitive_text
     from ..shared.observability import safe_task_log
 except ImportError:
     from ai import format_ai_tweet_summary
     from config import (
+        config_get,
         resolve_hide_original_when_translated,
         resolve_manual_send_interval,
     )
+    from media_support.client import NitterClient
     from media_support.fxtwitter_client import FxTwitterClient
     from media_support.html_backend.query import MAX_QUERY_LENGTH
     from media_support.network import UnsafeUrlError, validate_http_url
@@ -41,11 +45,49 @@ except ImportError:
         SearchSessionStore,
     )
     from rendering.tweets import format_twitter_trends
-    from shared import normalize_username, safe_call
+    from shared import normalize_username, safe_call, sanitize_sensitive_text
     from shared.observability import safe_task_log
 
 
 class ManualCommandMixin:
+    @property
+    def fetch_backend(self) -> str:
+        return (
+            str(
+                config_get(getattr(self, "config", {}), "fetch_backend", "mix") or "mix"
+            )
+            .strip()
+            .lower()
+        )
+
+    @property
+    def fxtwitter_client(self) -> FxTwitterClient:
+        client = getattr(self, "fxtwitter", None)
+        if client is None:
+            nitter = getattr(self, "nitter", None)
+            client = getattr(nitter, "fxtwitter", None)
+        if client is None:
+            client = FxTwitterClient()
+            self.fxtwitter = client
+        return client
+
+    def _get_fxtwitter_client(self) -> FxTwitterClient | None:
+        client = getattr(self, "fxtwitter", None)
+        if client is not None:
+            return client
+        nitter = getattr(self, "nitter", None)
+        client = getattr(nitter, "fxtwitter", None)
+        if client is not None:
+            return client
+        if self.fetch_backend == "fx":
+            return self.fxtwitter_client
+        if isinstance(nitter, NitterClient):
+            return self.fxtwitter_client
+        raw_backend = config_get(getattr(self, "config", {}), "fetch_backend", None)
+        if raw_backend and str(raw_backend).strip().lower() in ("mix", "fx"):
+            return self.fxtwitter_client
+        return None
+
     @staticmethod
     def _log_manual_send_task(
         title: str,
@@ -140,47 +182,95 @@ class ManualCommandMixin:
         )
 
         started = time.perf_counter()
-        if hasattr(self.nitter, "begin_run_host_skip"):
-            self.nitter.begin_run_host_skip()
-        try:
-            try:
-                instance, tweets = await self.nitter.fetch_user(
-                    username, limit, filter_reposts=False
-                )
-            except Exception as exc:
-                logger.warning(f"[NitterTweets] 手动获取 @{username} 推文失败: {exc}")
-                self._log_manual_no_send_task(
-                    "推文查询失败",
-                    operation="user_timeline",
-                    source=f"@{username}",
-                    started=started,
-                    status="抓取失败",
-                    error_detail=str(exc),
-                    warning=True,
-                )
-                await event.send(
-                    event.plain_result(
-                        f"获取 @{username} 推文失败，请检查自建 Nitter 实例。"
-                    )
-                )
-                return
-            if not tweets:
-                self._log_manual_no_send_task(
-                    "推文查询完成",
-                    operation="user_timeline",
-                    source=f"@{username}",
-                    instance=instance,
-                    started=started,
-                    status="无公开推文",
-                )
-                await event.send(
-                    event.plain_result(f"没有找到 @{username} 的公开推文。")
-                )
-                return
+        backend = self.fetch_backend
+        instance = ""
+        tweets = []
+        fx_error: Exception | None = None
 
-        finally:
-            if hasattr(self.nitter, "end_run_host_skip"):
-                self.nitter.end_run_host_skip()
+        fx = self._get_fxtwitter_client()
+        if backend in ("mix", "fx") and fx is not None:
+            try:
+                fx_tweets, _ = await asyncio.to_thread(
+                    fx.fetch_user_timeline,
+                    username,
+                    count=int(limit),
+                    skip_plain_text=False,
+                    filter_reposts=False,
+                )
+                inst = getattr(fx, "base_url", "https://api.fxtwitter.com")
+                instance = (
+                    inst.replace("https://", "").replace("http://", "").rstrip("/")
+                    or "api.fxtwitter.com"
+                )
+                tweets = fx_tweets
+            except Exception as exc:
+                fx_error = exc
+                if backend == "fx":
+                    logger.warning(
+                        f"[NitterTweets] FxTwitter 手动获取 @{username} 推文失败 (fx模式): {sanitize_sensitive_text(str(exc))}"
+                    )
+                    self._log_manual_no_send_task(
+                        "推文查询失败",
+                        operation="user_timeline",
+                        source=f"@{username}",
+                        started=started,
+                        status="抓取失败",
+                        error_detail=str(exc),
+                        warning=True,
+                    )
+                    await event.send(
+                        event.plain_result(f"获取 @{username} 推文失败，请稍后重试。")
+                    )
+                    return
+                logger.warning(
+                    f"[NitterTweets] FxTwitter 手动获取 @{username} 异常，平滑回退自建 Nitter: {sanitize_sensitive_text(str(exc))}"
+                )
+
+        if backend == "nitter" or (
+            backend == "mix" and (fx is None or fx_error is not None)
+        ):
+            if hasattr(self.nitter, "begin_run_host_skip"):
+                self.nitter.begin_run_host_skip()
+            try:
+                try:
+                    instance, tweets = await self.nitter.fetch_user(
+                        username, limit, filter_reposts=False
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[NitterTweets] 手动获取 @{username} 推文失败: {exc}"
+                    )
+                    self._log_manual_no_send_task(
+                        "推文查询失败",
+                        operation="user_timeline",
+                        source=f"@{username}",
+                        started=started,
+                        status="抓取失败",
+                        error_detail=str(exc),
+                        warning=True,
+                    )
+                    await event.send(
+                        event.plain_result(
+                            f"获取 @{username} 推文失败，请检查自建 Nitter 实例。"
+                        )
+                    )
+                    return
+            finally:
+                if hasattr(self.nitter, "end_run_host_skip"):
+                    self.nitter.end_run_host_skip()
+
+        if not tweets:
+            self._log_manual_no_send_task(
+                "推文查询完成",
+                operation="user_timeline",
+                source=f"@{username}",
+                instance=instance,
+                started=started,
+                status="无公开推文",
+            )
+            await event.send(event.plain_result(f"没有找到 @{username} 的公开推文。"))
+            return
+
         sent_count = await self._send_tweets_response(event, username, instance, tweets)
         self._log_manual_send_task(
             "推文查询完成",
@@ -304,22 +394,82 @@ class ManualCommandMixin:
             MAX_FETCH_CAP * 2 if had_known else MAX_FETCH_CAP,
             max(limit * pages, limit + need, 15 if had_known else limit),
         )
-        try:
-            instance, fetched = await asyncio.to_thread(
-                self.nitter.search,
-                effective_query,
-                fetch_limit,
-                max_pages=pages,
-                sort=sort or None,
-            )
-        except TypeError:
+
+        backend = self.fetch_backend
+        instance = ""
+        fetched = []
+        fx_error: Exception | None = None
+
+        fx = self._get_fxtwitter_client()
+        if backend in ("mix", "fx") and fx is not None:
+            try:
+                fx_tweets, _ = await asyncio.to_thread(
+                    fx.search_tweets,
+                    query,
+                    count=fetch_limit,
+                    is_media=is_media_search,
+                )
+                inst = getattr(fx, "base_url", "https://api.fxtwitter.com")
+                instance = (
+                    inst.replace("https://", "").replace("http://", "").rstrip("/")
+                    or "api.fxtwitter.com"
+                )
+                fetched = fx_tweets
+            except Exception as exc:
+                fx_error = exc
+                if backend == "fx":
+                    logger.warning(
+                        f"[NitterTweets] FxTwitter 搜索失败 (fx模式) query={query!r}: {sanitize_sensitive_text(str(exc))}"
+                    )
+                    self._log_manual_no_send_task(
+                        "推文搜索失败",
+                        operation="tweet_search",
+                        source=query,
+                        started=search_started,
+                        status="抓取失败",
+                        error_detail=str(exc),
+                        warning=True,
+                    )
+                    await event.send(event.plain_result("搜索失败，请稍后重试"))
+                    return
+                logger.warning(
+                    f"[NitterTweets] FxTwitter 搜索「{query}」异常，平滑回退自建 Nitter: {sanitize_sensitive_text(str(exc))}"
+                )
+
+        if backend == "nitter" or (
+            backend == "mix" and (fx is None or fx_error is not None)
+        ):
             try:
                 instance, fetched = await asyncio.to_thread(
                     self.nitter.search,
                     effective_query,
                     fetch_limit,
+                    max_pages=pages,
                     sort=sort or None,
                 )
+            except TypeError:
+                try:
+                    instance, fetched = await asyncio.to_thread(
+                        self.nitter.search,
+                        effective_query,
+                        fetch_limit,
+                        sort=sort or None,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[NitterTweets] 搜索失败 query={query!r}: {exc}")
+                    self._log_manual_no_send_task(
+                        "推文搜索失败",
+                        operation="tweet_search",
+                        source=query,
+                        started=search_started,
+                        status="抓取失败",
+                        error_detail=str(exc),
+                        warning=True,
+                    )
+                    await event.send(
+                        event.plain_result("搜索失败，请稍后重试或检查自建 Nitter 实例")
+                    )
+                    return
             except Exception as exc:
                 logger.warning(f"[NitterTweets] 搜索失败 query={query!r}: {exc}")
                 self._log_manual_no_send_task(
@@ -335,21 +485,6 @@ class ManualCommandMixin:
                     event.plain_result("搜索失败，请稍后重试或检查自建 Nitter 实例")
                 )
                 return
-        except Exception as exc:
-            logger.warning(f"[NitterTweets] 搜索失败 query={query!r}: {exc}")
-            self._log_manual_no_send_task(
-                "推文搜索失败",
-                operation="tweet_search",
-                source=query,
-                started=search_started,
-                status="抓取失败",
-                error_detail=str(exc),
-                warning=True,
-            )
-            await event.send(
-                event.plain_result("搜索失败，请稍后重试或检查自建 Nitter 实例")
-            )
-            return
 
         fetched_list = list(fetched or [])
         # Local fallback: drop pure-text tweets for media-only search.
@@ -598,15 +733,14 @@ class ManualCommandMixin:
         self._mark_cooldown(event, scope="trends")
         started = time.perf_counter()
 
-        client = getattr(self, "fxtwitter", None)
-        if client is None:
-            client = FxTwitterClient()
-            self.fxtwitter = client
+        client = self.fxtwitter_client
 
         try:
             trends = await asyncio.to_thread(client.fetch_trends)
         except Exception as exc:
-            logger.warning(f"[NitterTweets] 手动获取推特热搜失败: {exc}")
+            logger.warning(
+                f"[NitterTweets] 手动获取推特热搜失败: {sanitize_sensitive_text(str(exc))}"
+            )
             trends = []
 
         if not trends:

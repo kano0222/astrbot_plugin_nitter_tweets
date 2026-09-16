@@ -36,10 +36,12 @@ except ImportError:
     )
 
 try:
+    from .fxtwitter_client import FxTwitterClient
     from .host_score import HostScoreBook
     from .network import build_request_headers, compat_urlopen
     from .rss_run_skip import RssRunHostSkip
 except ImportError:
+    from fxtwitter_client import FxTwitterClient
     from host_score import HostScoreBook
     from network import build_request_headers, compat_urlopen
     from rss_run_skip import RssRunHostSkip
@@ -264,6 +266,7 @@ class NitterClient:
         )
         # In-memory instance scores; NitterService shares this book with HTML.
         self.host_scores = HostScoreBook()
+        self.fxtwitter = FxTwitterClient(timeout=self.timeout)
         # S2=A: set only for one check/command via begin_run_host_skip().
         # Context-local state prevents overlapping manual and scheduled tasks
         # from marking one another's mirror set.  A property below preserves

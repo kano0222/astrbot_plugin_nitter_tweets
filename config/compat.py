@@ -100,6 +100,7 @@ CONFIG_GROUP_BY_KEY = {
     "html_min_interval": "basic",
     "html_max_pages": "basic",
     "html_request_timeout": "basic",
+    "fetch_backend": "basic",
     "send_image_attachments": "media",
     "send_video_attachments": "media",
     "media_quality": "media",
