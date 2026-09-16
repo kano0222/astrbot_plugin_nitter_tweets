@@ -1292,3 +1292,42 @@ def test_fetch_backend_property():
 
     runner.config = {"fetch_backend": None}
     assert runner.fetch_backend == "mix"
+
+
+# ==============================================================================
+# 12. _get_fxtwitter_client resolution
+# ==============================================================================
+def test_get_fxtwitter_client_resolution():
+    from media_support.fxtwitter_client import FxTwitterClient
+
+    # 1. Directly on runner
+    mock_direct = MagicMock(spec=FxTwitterClient)
+    runner = DummyRunner({}, MagicMock())
+    runner.fxtwitter = mock_direct
+    assert runner._get_fxtwitter_client() is mock_direct
+
+    # 2. On runner.owner
+    runner2 = DummyRunner({}, MagicMock())
+    runner2.fxtwitter = None
+    mock_owner_fx = MagicMock(spec=FxTwitterClient)
+    runner2.owner = MagicMock()
+    runner2.owner.fxtwitter = mock_owner_fx
+    assert runner2._get_fxtwitter_client() is mock_owner_fx
+
+    # 3. Explicit mix mode instantiates FxTwitterClient
+    runner3 = DummyRunner({"fetch_backend": "mix"}, MagicMock())
+    runner3.fxtwitter = None
+    runner3.owner = None
+    runner3.nitter = MagicMock()
+    runner3.nitter.fxtwitter = None
+    runner3.nitter.timeout = 18.0
+    client = runner3._get_fxtwitter_client()
+    assert isinstance(client, FxTwitterClient)
+
+    # 4. Pure nitter mode returns None
+    runner4 = DummyRunner({"fetch_backend": "nitter"}, MagicMock())
+    runner4.fxtwitter = None
+    runner4.owner = None
+    runner4.nitter = MagicMock()
+    runner4.nitter.fxtwitter = None
+    assert runner4._get_fxtwitter_client() is None

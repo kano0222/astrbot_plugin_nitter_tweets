@@ -56,6 +56,19 @@ class TestFormatTwitterTrends:
         # Data source disclaimer
         assert "数据来源：FxTwitter / X" in result
 
+    def test_format_with_intermittent_empty_items_preserves_consecutive_ranks(self):
+        """Must produce consecutive 1-based ranks even if middle items are null or empty."""
+        trends = [
+            {"name": "Topic 1", "rank": None, "context": "Gaming"},
+            {},
+            {"name": ""},
+            {"name": "Topic 2", "rank": None, "context": ""},
+        ]
+        result = format_twitter_trends(trends)
+        assert "1. Topic 1 (Gaming)" in result
+        assert "2. Topic 2" in result
+        assert "3." not in result
+
 
 class _Host(ManualCommandMixin):
     def __init__(self, cooldown_seconds: float = 0.0):

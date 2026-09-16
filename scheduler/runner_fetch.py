@@ -72,6 +72,9 @@ class SchedulerFetchMixin:
         client = getattr(self, "fxtwitter", None)
         if client is not None:
             return client
+        client = getattr(getattr(self, "owner", None), "fxtwitter", None)
+        if client is not None:
+            return client
         client = getattr(getattr(self, "nitter", None), "fxtwitter", None)
         if client is not None:
             return client

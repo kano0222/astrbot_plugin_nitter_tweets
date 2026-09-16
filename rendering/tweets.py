@@ -1483,7 +1483,7 @@ def format_twitter_trends(trends: list[dict] | None) -> str:
 
     lines = ["🔥 Twitter/X 实时趋势热搜榜", ""]
     valid_count = 0
-    for idx, item in enumerate(trends, 1):
+    for item in trends:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
@@ -1492,9 +1492,9 @@ def format_twitter_trends(trends: list[dict] | None) -> str:
         valid_count += 1
         context = str(item.get("context") or "").strip()
         if context:
-            lines.append(f"{idx}. {name} ({context})")
+            lines.append(f"{valid_count}. {name} ({context})")
         else:
-            lines.append(f"{idx}. {name}")
+            lines.append(f"{valid_count}. {name}")
 
     if valid_count == 0:
         return "暂无实时 Twitter/X 热搜趋势，请稍后再试。"

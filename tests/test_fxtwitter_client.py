@@ -400,7 +400,7 @@ class TestFxTwitterClientFetchTrends:
         assert trends[0]["rank"] is None
         assert trends[0]["context"] == "Trending in Japan"
 
-    def test_fetch_trends_catches_exception_safely(self, monkeypatch):
+    def test_fetch_trends_raises_exception_for_caller_audit(self, monkeypatch):
         client = FxTwitterClient()
 
         def mock_fetch_json(url: str, **kwargs):
@@ -408,9 +408,9 @@ class TestFxTwitterClientFetchTrends:
 
         monkeypatch.setattr(client, "_fetch_json", mock_fetch_json)
 
-        # fetch_trends must not raise; it must safely return []
-        trends = client.fetch_trends()
-        assert trends == []
+        # fetch_trends must raise FxTwitterError so caller can log failure audit
+        with pytest.raises(FxTwitterError):
+            client.fetch_trends()
 
     def test_fetch_trends_missing_trends_field(self, monkeypatch):
         client = FxTwitterClient()

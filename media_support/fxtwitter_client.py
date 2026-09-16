@@ -11,7 +11,6 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 try:
-    from ..shared.observability import sanitize_sensitive_text
     from ..shared.utils import (
         TweetItem,
         format_tweet_published,
@@ -24,7 +23,6 @@ except ImportError:
         _extract_status_text,
         _media_from_fxtwitter,
     )
-    from shared.observability import sanitize_sensitive_text
     from shared.utils import (
         TweetItem,
         format_tweet_published,
@@ -277,14 +275,7 @@ class FxTwitterClient:
 
     def fetch_trends(self, timeout: float = 10.0) -> list[dict]:
         url = f"{self.base_url}/2/trends"
-        try:
-            data = self._fetch_json(url, timeout=timeout)
-        except Exception as exc:
-            logger.warning(
-                f"[NitterTweets] 获取 Twitter 趋势失败: {sanitize_sensitive_text(str(exc))}"
-            )
-            return []
-
+        data = self._fetch_json(url, timeout=timeout)
         raw_trends = data.get("trends")
         if isinstance(raw_trends, list):
             return [t for t in raw_trends if isinstance(t, dict)]
