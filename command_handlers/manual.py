@@ -916,7 +916,7 @@ class ManualCommandMixin:
                 )
                 # Preserve compatibility with older overrides that returned
                 # None/True without invoking the new progress callback.
-                if sent is not False:
+                if sent is not False and sent_count == 0:
                     record_sent(len(tweets))
                 return sent_count
             finally:
@@ -1062,6 +1062,24 @@ class ManualCommandMixin:
         remaining = list(tweets[sent_count:])
         if not remaining:
             return True
+
+        if getattr(self.sender, "last_send_rejected", False) and not getattr(
+            self.sender, "forward_reject_plain_fallback_enabled", False
+        ):
+            notice = (
+                "⚠️ 部分推文触发平台风控，已自动略过。"
+                if sent_count > 0
+                else "⚠️ 内容触发平台风控，已自动略过。"
+            )
+            try:
+                if hasattr(event, "plain_result"):
+                    await event.send(event.plain_result(notice))
+                else:
+                    await event.send(MessageChain([Plain(notice)]))
+            except Exception as exc:
+                logger.warning(f"[NitterTweets] 发送风控略过提示失败: {exc}")
+            return sent_count > 0
+
         remaining_start_index = tweet_start_index + sent_count
         remaining_notices = notices if sent_count == 0 else []
         remaining_header = header_text if sent_count == 0 else ""
