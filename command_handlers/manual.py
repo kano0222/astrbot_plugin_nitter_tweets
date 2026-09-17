@@ -1077,7 +1077,9 @@ class ManualCommandMixin:
                 else:
                     await event.send(MessageChain([Plain(notice)]))
             except Exception as exc:
-                logger.warning(f"[NitterTweets] 发送风控略过提示失败: {exc}")
+                logger.warning(
+                    f"[NitterTweets] 发送风控略过提示失败: {sanitize_sensitive_text(str(exc))}"
+                )
             return sent_count > 0
 
         remaining_start_index = tweet_start_index + sent_count

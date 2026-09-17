@@ -53,7 +53,9 @@ class SenderForwardMixin:
             indexed_chunks.append((index, chunk))
             index += len(chunk)
         has_failed_chunk = False
+        any_chunk_rejected = False
         for chunk_index, chunk in indexed_chunks:
+            self.last_send_rejected = False
             chunk_ok = await self._send_event_forward_chunk(
                 event,
                 username,
@@ -67,13 +69,18 @@ class SenderForwardMixin:
                 link_style=link_style,
                 on_delivered=on_delivered,
             )
+            chunk_rejected = getattr(self, "last_send_rejected", False)
+            if chunk_rejected:
+                any_chunk_rejected = True
             if not chunk_ok:
-                if getattr(self, "last_send_rejected", False) and not getattr(
+                if chunk_rejected and not getattr(
                     self, "forward_reject_plain_fallback_enabled", False
                 ):
                     has_failed_chunk = True
                     continue
+                self.last_send_rejected = any_chunk_rejected
                 return False
+        self.last_send_rejected = any_chunk_rejected
         return not has_failed_chunk
 
     async def _send_event_forward_chunk(
@@ -268,6 +275,7 @@ class SenderForwardMixin:
         remaining_index = tweet_start_index
         remaining_notices = notices
         has_rejected_part = False
+        any_part_rejected = False
         if should_split:
             parts = self._split_tweets_for_forward_retry(tweets)
             if parts:
@@ -291,6 +299,7 @@ class SenderForwardMixin:
                         part_delivered += delivered
                         self._notify_delivered(on_delivered, delivered)
 
+                    self.last_send_rejected = False
                     part_ok = await self._send_event_forward_chunk(
                         event,
                         username,
@@ -304,10 +313,13 @@ class SenderForwardMixin:
                         link_style=link_style,
                         on_delivered=record_part_delivered,
                     )
+                    part_rejected = getattr(self, "last_send_rejected", False)
+                    if part_rejected:
+                        any_part_rejected = True
                     if part_ok and part_delivered < len(part):
                         record_part_delivered(len(part) - part_delivered)
                     if not part_ok:
-                        if getattr(self, "last_send_rejected", False) and not getattr(
+                        if part_rejected and not getattr(
                             self, "forward_reject_plain_fallback_enabled", False
                         ):
                             has_rejected_part = True
@@ -324,6 +336,7 @@ class SenderForwardMixin:
                         break
                     index += len(part)
                 else:
+                    self.last_send_rejected = any_part_rejected
                     if has_rejected_part:
                         return False
                     return True
@@ -336,7 +349,7 @@ class SenderForwardMixin:
         ):
             logger.warning(
                 f"[NitterTweets] 合并转发因内容风控被拒收，跳过直发与纯文本降级: "
-                f"{len(remaining)} 条推文 (target={self._event_target(event)})"
+                f"{len(remaining)} 条推文 (target={sanitize_sensitive_text(self._event_target(event))})"
             )
             return False
 
