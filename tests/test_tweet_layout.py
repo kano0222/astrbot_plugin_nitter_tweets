@@ -508,3 +508,23 @@ def test_renderer_keep_status_url_normalizes_quote_link():
     assert "http://localhost:8080" not in out
     assert "https://x.com/someone/status/123" in out
     assert "Great finding!" in out
+
+
+def test_normalize_external_links_does_not_rewrite_arbitrary_urls():
+    assert (
+        normalize_external_links("https://example.com/alice/status/999")
+        == "https://example.com/alice/status/999"
+    )
+    assert (
+        normalize_external_links("https://github.com/torvalds/status/12345")
+        == "https://github.com/torvalds/status/12345"
+    )
+    assert (
+        normalize_external_links("https://status.io/team/status/123")
+        == "https://status.io/team/status/123"
+    )
+
+
+def test_strip_external_links_preserves_legitimate_dash_lines():
+    text = "第一段\n—\n第二段\n——\n第三段"
+    assert strip_external_links(text) == text

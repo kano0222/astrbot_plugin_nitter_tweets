@@ -1488,3 +1488,23 @@ async def test_manual_cmd_tweet_pic_respects_global_filter_reposts_disabled():
     mock_nitter.fetch_user.assert_called_once_with(
         "nasa", 5, filter_reposts=False, skip_plain_text=True
     )
+
+
+@pytest.mark.asyncio
+async def test_scheduler_fetch_passes_configured_html_max_pages():
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    mock_fx.fetch_user_timeline = MagicMock(return_value=([], None))
+    mock_nitter = MagicMock()
+
+    runner = DummyRunner(
+        {"fetch_backend": "fx", "html_max_pages": 5}, mock_nitter, mock_fx
+    )
+    group = _blogger_group(["alice"])
+
+    await runner._fetch_group_users(
+        group, fetch_limit=10, skip_plain_text=False, scan_watermarks={}
+    )
+    mock_fx.fetch_user_timeline.assert_called_once_with(
+        "alice", count=10, skip_plain_text=False, filter_reposts=True, max_pages=5
+    )

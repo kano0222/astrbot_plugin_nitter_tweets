@@ -223,6 +223,7 @@ class FxTwitterClient:
         current_cursor = cursor
         pages_fetched = 0
         last_cursor = None
+        cursor_stalled = False
 
         while len(accumulated) < target_count and pages_fetched < pages_limit:
             params: dict[str, Any] = {"count": per_page}
@@ -250,15 +251,16 @@ class FxTwitterClient:
                     continue
                 accumulated.append(tweet)
 
-            if (
-                len(accumulated) >= target_count
-                or not last_cursor
-                or last_cursor == current_cursor
-            ):
+            if last_cursor and last_cursor == current_cursor:
+                cursor_stalled = True
+                break
+
+            if len(accumulated) >= target_count or not last_cursor:
                 break
             current_cursor = last_cursor
 
-        return accumulated[:target_count], last_cursor
+        effective_cursor = None if (cursor_stalled or not last_cursor) else last_cursor
+        return accumulated[:target_count], effective_cursor
 
     def search_tweets(
         self,

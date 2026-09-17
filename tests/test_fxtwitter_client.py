@@ -354,6 +354,27 @@ class TestFxTwitterClientRoutesAndGuards:
         assert len(tweets) == 2
         assert next_cursor == "cursor_p3"
 
+    def test_user_timeline_stalled_cursor_returns_none_next_cursor(self, monkeypatch):
+        client = FxTwitterClient()
+        data = {
+            "code": 200,
+            "results": [
+                {
+                    "type": "status",
+                    "id": "1",
+                    "text": "Hi",
+                    "url": "https://x.com/u/status/1",
+                }
+            ],
+            "cursor": {"bottom": "cur_same"},
+        }
+        monkeypatch.setattr(client, "_fetch_json", lambda url, **kw: data)
+        tweets, next_cursor = client.fetch_user_timeline(
+            "u", count=10, cursor="cur_same"
+        )
+        assert len(tweets) == 1
+        assert next_cursor is None
+
 
 class TestFxTwitterClientSearch:
     def test_search_tweets_normal(self, monkeypatch):

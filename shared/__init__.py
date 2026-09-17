@@ -39,6 +39,7 @@ from .utils import (
     normalize_external_links,
     normalize_seen_account_key,
     normalize_username,
+    register_nitter_instances,
     safe_call,
     strip_external_links,
 )
@@ -101,6 +102,7 @@ __all__ = [
     "normalize_seen_account_key",
     "normalize_stable_group_id",
     "normalize_username",
+    "register_nitter_instances",
     "safe_call",
     "safe_log",
     "safe_task_log",
