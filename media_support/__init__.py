@@ -17,11 +17,19 @@ except ImportError:
 
 from .cache import MediaCacheCleanupResult
 from .client import NitterClient, SchedulerFetchResult
+from .fxtwitter_client import (
+    FxTwitterClient,
+    FxTwitterError,
+    FxTwitterNotFoundError,
+)
 from .nitter import NitterService
 from .service import MediaPreparationResult, MediaService
 from .xdown import XdownMediaCandidate, XdownMediaParser
 
 __all__ = [
+    "FxTwitterClient",
+    "FxTwitterError",
+    "FxTwitterNotFoundError",
     "MEDIA_SIZE_LIMIT_ERROR",
     "MEDIA_STATUS_NO_CANDIDATE",
     "MEDIA_STATUS_POLICY_SKIPPED",

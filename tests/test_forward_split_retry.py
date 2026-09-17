@@ -486,6 +486,7 @@ async def test_merged_direct_media_only_no_video_uncertain_stays_failed():
 @pytest.mark.asyncio
 async def test_send_merged_to_umo_splits_and_falls_back_only_undelivered_suffix():
     sender = TweetSender.__new__(TweetSender)
+    sender.forward_reject_plain_fallback_enabled = True
     sender.FORWARD_SPLIT_MIN_TWEETS = 1
     adapter = MagicMock()
     adapter.name = "onebot"
@@ -645,3 +646,89 @@ async def test_chunked_forward_propagates_partial_status_without_generic_error()
     assert outcome.success is True
     assert outcome.delivery_status == "partial_failed"
     assert outcome.delivery_error == "media failed"
+
+
+@pytest.mark.asyncio
+async def test_send_merged_to_umo_reject_omits_plain_fallback_and_marks_seen_when_disabled():
+    sender = TweetSender.__new__(TweetSender)
+    sender.forward_reject_plain_fallback_enabled = False
+    sender.FORWARD_SPLIT_MIN_TWEETS = 1
+    adapter = MagicMock()
+    adapter.name = "onebot"
+    adapter.supports_merged_forward = True
+    sender._delivery_adapter_for_umo = MagicMock(return_value=adapter)
+    sender._should_use_merge_for_count = MagicMock(return_value=True)
+    sender._should_chunk_forward_tweets = MagicMock(return_value=False)
+    sender._count_attached_videos = MagicMock(return_value=0)
+    sender._merged_forward_has_video = MagicMock(return_value=False)
+    sender.renderer = MagicMock()
+    sender.renderer.build_merged_nodes_for_uin = MagicMock(return_value="nodes")
+    sender.renderer.format_merged_plain = MagicMock()
+
+    rejected = SendAttempt(
+        success=False,
+        retryable=True,
+        error="ActionFailed: retcode=1200 res_id failed",
+    )
+    sender._send_context_message = AsyncMock(
+        side_effect=[
+            rejected,  # full batch
+            SendAttempt(success=True),  # left half
+            rejected,  # right half rejected
+        ]
+    )
+
+    tweets = _tweets(2)
+    outcome = await sender.send_merged_to_umo(
+        MagicMock(),
+        "aiocqhttp:GroupMessage:1",
+        [
+            ("left", "https://nitter.example", [tweets[0]]),
+            ("right", "https://nitter.example", [tweets[1]]),
+        ],
+        group_label="group",
+        batch_summary="summary",
+    )
+
+    assert outcome.success is True
+    assert outcome.delivery_status == "partial_failed"
+    assert outcome.delivered_status_ids == ("1000", "1001")
+    sender.renderer.format_merged_plain.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_forward_chunk_to_umo_reject_omits_plain_fallback_and_marks_seen_when_disabled():
+    sender = TweetSender.__new__(TweetSender)
+    sender.forward_reject_plain_fallback_enabled = False
+    sender.FORWARD_SPLIT_MIN_TWEETS = 1
+    sender.renderer = MagicMock()
+    sender.renderer.format_plain = MagicMock()
+    sender.renderer.build_nodes_for_uin = MagicMock(return_value="nodes")
+    sender._count_attached_videos = MagicMock(return_value=0)
+    sender._send_direct_to_umo = AsyncMock(
+        return_value=SendOutcome(
+            success=False,
+            error="ActionFailed: retcode=1200 res_id failed",
+            delivery_status="failed",
+        )
+    )
+
+    err_1200 = "ActionFailed: retcode=1200 发送转发消息（res_id：x 失败"
+    sender._send_context_message = AsyncMock(
+        return_value=SendAttempt(success=False, retryable=True, error=err_1200)
+    )
+
+    tweets = _tweets(2)
+    outcome = await TweetSender._send_forward_chunk_to_umo(
+        sender,
+        MagicMock(),
+        "aiocqhttp:GroupMessage:1",
+        "u",
+        "https://nitter.example",
+        tweets,
+    )
+
+    assert outcome.success is True
+    assert outcome.delivery_status == "partial_failed"
+    assert outcome.delivered_status_ids == ("1000", "1001")
+    sender.renderer.format_plain.assert_not_called()

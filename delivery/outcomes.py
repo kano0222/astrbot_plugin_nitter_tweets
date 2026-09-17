@@ -19,6 +19,7 @@ class SendAttempt:
 @dataclass(slots=True)
 class SendOutcome:
     success: bool
+    mode: str = ""
     error: str = ""
     warning: str = ""
     delivery_status: str = "success"

@@ -123,6 +123,7 @@ AstrBot 设置界面已按“基础、媒体、AI 翻译、后台检查、推送
 | 配置 | 说明 |
 | --- | --- |
 | `instances` | 自建 Nitter 实例列表，同时用于 RSS、HTML 搜索和 List；默认空，必须由用户填写。 |
+| `fetch_backend` | 推文抓取后端策略，可选 `mix`（默认）、`nitter`、`fx`。控制博主与标签推文从 FxTwitter 还是自建 Nitter 拉取；详见下文[抓取后端策略](#抓取后端策略)。 |
 | `storage_backend` | 存储后端；运行期固定使用本地 SQLite 数据库。旧 KV 推送记录只会在启动迁移时自动导入，不再作为运行后端。 |
 | `request_timeout` | 单次 RSS 请求等待某个 Nitter 实例响应的最长秒数；同一实例初次请求失败后最多再重试 1 次，仍失败才尝试下一个实例。 |
 | `default_limit` | 手动 `/推文` 和 `/镜像测试` 未填写数量时的默认获取条数；填写数量时不额外截断。 |
@@ -148,7 +149,9 @@ AstrBot 设置界面已按“基础、媒体、AI 翻译、后台检查、推送
 
 | 配置 | 说明 |
 | --- | --- |
+| `send_batch_summary_enabled` | 非合并普通推送时是否发送概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”），默认开启（`true`）。关闭后仅逐条发送推文卡片，阻断发送单独的概括消息；QQ 合并转发整包发送时不使用本项。 |
 | `merge_tweet_threshold` | 私人号 OneBot 新推文总数达到多少条时启用合并转发；QQ Official 不使用该阈值；`0` 关闭，默认 `2`。 |
+| `forward_reject_plain_fallback_enabled` | 合并转发因内容风控（如 retcode 1200 / res_id 失败）被平台拒收时，是否降级发送纯文本链接消息保底。默认关闭（`false`）：跳过纯文本降级并直接标记已读写入 seen 推进水位，避免敏感链接在群聊刷屏并防止下一轮重复抓取风控；开启后则发送纯文本链接兜底。 |
 | `send_target_interval` | 同一订阅源发送到多个目标之间的发送间隔。 |
 | `send_user_interval` | 多个订阅源之间的发送间隔；Tag/List 查询抓取也按该间隔串行等待。 |
 | `manual_send_interval` | 手动 `/推文`、`/推文搜索`、`/镜像测试` 非合并转发时，逐条消息间隔（秒），默认 `0`；在平台适配前 sleep，多平台生效。 |
@@ -283,7 +286,7 @@ HTML 简略规则（`[NitterTweets][html]`，由 `QuietHtmlLog` 实现）：
 - 手动 `/推文`、`/镜像测试` 始终保留转发，便于完整查看镜像返回内容；`/推文搜索` 保持过滤纯转推，不读取分组开关。
 - 转发过滤无法解析作者时会保留，避免误删；博主自己发布的引用或评论推文会保留。
 - 被过滤的转发不会推送；完整扫描仍会把其 ID 纳入扫描边界，避免下轮重复处理。如果某一页全是转发且存在下一页游标，插件会继续翻页查找更旧原创。
-- 后台检查推送的新推文会在本轮每个目标的第一条普通消息或合并转发头部显示批次概览：按类型显示“n 位博主”“n 个搜索订阅”或“n 个 List”、推文数和来源分组；概括只出现一次，不显示订阅源进度或推文序号。
+- 默认开启 `send_batch_summary_enabled` 时，后台检查推送的新推文会在本轮每个目标的第一条普通消息或合并转发头部显示批次概览（按类型显示“n 位博主”“n 个搜索订阅”或“n 个 List”、推文数和来源分组）；关闭 `send_batch_summary_enabled` 后普通逐条推送不再发送该条横幅消息，合并转发头部仍保留该概览；概括只出现一次，不显示订阅源进度或推文序号。
 - 同一个目标群同时属于多个分组时，消息按各分组自己的检查/发布流程发出，并通过“分组”行区分来源。
 - 没有新推文时默认只写日志，不往目标会话发送消息。
 - 后台检查结果会区分“正常无更新”“HTML 返回空结果”“结果全部被过滤”“扫描未完整”和“抓取失败”；空结果或实例不可用时会显示实例轮换原因、水位保持不变，不再使用“没有发现新推文”概括。
@@ -336,6 +339,53 @@ python scripts\probe_nitter_fetch.py nasa 5 --instance http://nitter:8080 --incl
 ```text
 python scripts\test_video_download.py https://x.com/user/status/123 --resolution highest --max-duration-minutes 8
 ```
+
+## 抓取后端策略（fetch_backend）
+
+插件支持 `fetch_backend` 三档推文抓取后端策略（位于 `basic` 分组，默认 `mix`）：
+
+| 后端模式 | 博主推文（Blogger） | 标签搜索（Tag） | 列表订阅（List） | 适用场景 |
+| --- | --- | --- | --- | --- |
+| `mix`（默认） | FxTwitter 优先，失败增量回退自建 Nitter | FxTwitter 优先，遇 404/限流回退 Nitter HTML 搜索 | 物理隔离，强制自建 Nitter | **生产推荐**：极速响应、推特元数据全、自建 Nitter 负载低，具备完备容灾保底 |
+| `nitter` | 纯自建 Nitter（RSS 优先，HTML 自动后备） | 纯自建 Nitter HTML 搜索 | 纯自建 Nitter（RSS 优先，HTML 翻页后备） | **纯自托管**：不调用任何第三方公共 API，完全私有化自治 |
+| `fx` | 纯 FxTwitter API | 纯 FxTwitter 搜索 API | 物理隔离，强制自建 Nitter | **轻量免运维**：无需本地部署 Nitter 容器即可抓取博主与标签 |
+
+### 1. 三档模式工作原理与优缺点
+
+#### 混合容灾模式（`mix`，默认推荐）
+- **核心原理**：后台定时调度与手动命令（`/推文`、`/推文搜索`、`/推文搜图`）优先通过 FxTwitter 高速 API 并发拉取。当遇到网络超时、HTTP 429 限流或 404 Not Found 时，**仅将失败的博主或查询项增量移交给自建 Nitter 实例接盘**；已成功的项直接保留，不会重新请求 Nitter，将 Nitter 实例开销降至最低。
+- **优点**：抓取速度极快、推文结构完整丰富；自建 Nitter 仅作为兜底保底，大幅降低自建 Nitter 的 guest accounts/token 消耗与封禁风险；双通道互备保障推送连续性。
+- **缺点**：部分依赖上游 FxTwitter 公共服务可用性（但在故障时会自动无缝回退至自建 Nitter）。
+
+#### 纯自建 Nitter 模式（`nitter`）
+- **核心原理**：与历史版本行为完全一致，所有抓取任务纯粹在自建 Nitter 实例的 RSS 与 HTML 搜索管道内执行，完全不调用 FxTwitter API。
+- **优点**：完全自托管与自主可控，无任何外部第三方服务依赖。
+- **缺点**：高频检查或多博主时对自建 Nitter 的 guest accounts / tokens 消耗较快，容易遭遇推特 429 限流。
+
+#### 纯 FxTwitter 模式（`fx`）
+- **核心原理**：博主与标签推文完全走 FxTwitter API，失败时不再向自建 Nitter 回退。
+- **优点**：开箱即用，完全不需要在 VPS 上部署 Nitter 镜像与 Redis，资源占用极小。
+- **缺点**：若 FxTwitter 官方服务不可用或单 IP 频控则无法抓取；此外由于 FxTwitter 上游接口不支持 Twitter List，List 分组仍会走自建 Nitter。
+
+### 2. List 订阅严格物理隔离
+
+- **物理隔离原因**：FxTwitter API 原生仅支持用户时间线与推文检索，**完全不提供 Twitter List（列表）端点**。
+- **锁定规则**：无论全局 `fetch_backend` 设置为 `mix`、`nitter` 还是 `fx`，所有 `group_type: list` 的分组调度检查**严格在物理层面锁定为自建 Nitter 管道**（`/i/lists/<id>/rss` 优先，失败自动平滑回退至 HTML 翻页）。List 分组绝不会尝试请求 FxTwitter，确保 List 订阅功能的绝对可用与隔离性。
+
+### 3. 转推守卫机制（Retweet Guard）
+
+- **背景**：FxTwitter 提供了 `/media` 相册专线端点，但推特服务端在该端点会直接丢弃所有转推。
+- **守卫逻辑**：当用户通过 `filter_reposts_enabled=false` 配置保留转推时，插件自动触发转推守卫：强制改走 FxTwitter `statuses` 完整时间线端点，并在本地执行纯文本过滤与转推判定。这确保了用户既能利用 FxTwitter 的高速拉取能力，又绝不会因为服务端过滤而丢失转推中的图片与视频媒体。
+
+### 4. Tag 搜索 SafeSearch 404 平滑回退
+
+- **背景**：FxTwitter 搜索接口默认启用推特 SafeSearch。当检索词或标签涉及敏感、成人向（NSFW）内容时，FxTwitter 接口会直接返回 HTTP 404。
+- **回退机制**：在 `mix` 模式下，调度器与手动搜索会精准识别 SafeSearch 404 与限流异常，自动且平滑地回退至自建 Nitter HTML 搜索，确保敏感/成人向订阅推文不被漏推；所有异常日志严格经过 `sanitize_sensitive_text` 脱敏，防止私有信息泄露。
+
+### 5. 批次概括横幅控制（`send_batch_summary_enabled`）
+
+- **功能（Close #74）**：在非合并普通推送时，调度器默认会在推送推文卡片前发送一条批次概括横幅（如“📬 默认分组 · 1 位博主 · 1 条新推文”）。将 `send_batch_summary_enabled` 设置为 `false` 后，调度器在普通逐条发送路径中动态置空横幅，仅推送推文卡片，静音概括消息。
+- **合并转发兼容**：私人号 OneBot 满足 `merge_tweet_threshold` 走合并转发时，概括横幅作为整包的头部索引节点保留，不受该开关影响。
 
 ## Tag 搜索与 List 分组调度
 

@@ -2,6 +2,35 @@
 
 所有重要变更都会记录在这里。
 
+## [1.6.0] - 2026-09-16
+
+### Added
+
+- 支持 `fetch_backend` 三档推文抓取后端策略（`basic` 组，默认 `mix`）：
+  - `mix`（混合容灾模式，默认）：优先通过 FxTwitter 高速 API 并发拉取博主与标签推文；当 FxTwitter 遇到限流、404 或网络故障时，仅将失败的博主/查询增量交由自建 Nitter 实例接盘，实现高可用与自建 Nitter 低负载的最佳平衡。
+  - `nitter`（纯自建模式）：完全基于自建 Nitter 实例的 RSS 与 HTML 搜索管道，与历史版本行为一致，无外部第三方 API 依赖。
+  - `fx`（纯 FxTwitter 模式）：博主与标签推文全部走 FxTwitter API，无需自建 Nitter 即可轻量运行（List 分组仍物理锁定 Nitter）。
+- 新增 `/推特热搜` 实时趋势榜单指令（别名 `/twitter热搜`、`/推文热搜`、`/推特趋势`）：获取 Twitter/X 实时趋势热搜榜，展示排名、话题名称与推文热度；内置指令冷却、审计日志并防御性兼容上游 rank 为 null 的异常数据。
+- 新增 `send_batch_summary_enabled` 配置项（`push` 组，默认 `true`，Close #74）：控制在非合并普通推送时是否发送批次概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，静音单独的概括横幅；QQ 合并转发整包发送不受影响。
+- 新增 `forward_reject_plain_fallback_enabled` 配置项（`push` 组，默认 `false`）：控制在 QQ (OneBot/NapCat) 合并转发因平台内容风控（`retcode 1200 / res_id 失败`）被拒收时是否发送纯文本保底。默认关闭，遇风控直接略过违规推文并标记已读写入 `seen` 推进水位，杜绝群聊垃圾链接刷屏并防止下轮反复风控；开启后则发送纯文本链接兜底。
+- 新增极简 `/推图` 指令（无冗余别名，用法 `/推图 用户名 [数量]`）：直连相册专线拉取指定公开用户的最新相册媒体推文（过滤纯文本与转推），支持自建 Nitter 平滑回退并记录 `user_media` 审计日志。
+
+### Architecture & Defenses
+
+- **List 订阅严格物理隔离锁定 Nitter**：因 FxTwitter 原生不支持 Twitter List 端点，List 订阅分组严格与 FxTwitter 物理隔离，无论 `fetch_backend` 配置为何种模式，List 抓取始终强制走自建 Nitter 实例管道（RSS 优先并平滑回退 HTML）。
+- **转推守卫机制（Retweet Guard）**：针对 `filter_reposts_enabled=false`（用户想保留转推）场景，避免 FxTwitter `media` 专线端点在服务端将转推丢弃；转推保留时强制抓取 `statuses` 时间线全量推文并在本地过滤纯文本，确保转推中的图片与视频媒体不丢失。
+- **Tag 搜索 SafeSearch 404 平滑回退**：FxTwitter 搜索接口默认启用 SafeSearch，对于敏感或成人向标签推文可能直接返回 404；在 `mix` 模式下识别 404 / 限流等异常并自动无缝回退至自建 Nitter HTML 搜索，确保订阅推文不遗漏，且失败日志经过敏感信息脱敏处理。
+
+### Fixed
+
+- 修复仅媒体推文准备失败（如视频过大下载超时、格式损坏等）未写入 seen 导致定时调度进入死循环反复重推的问题；现在失败时直接写入 seen 并推进扫描水位线，并在日志中输出画质与大小配置调优建议。
+- 修复推文搜索会话缓存池（`SessionSearchBuffer`）在首条推文发送失败时重新插回队首导致后续搜索卡死的问题；增加 `failed_count` 参数将失败项从队列移出（保留在 `known_ids` 中防重复抓取），安全保留未尝试的后续推文。
+- 优化发送状态不确定（`_log_uncertain_delivery` / `UNCERTAIN_DELIVERY_WARNING`）及视频下载超时的警告日志，针对大文件/视频超时追加明确的 WebUI 配置调优建议（提示调整 `media_quality` 或 `media_max_size_mb`）。
+- 修复调度器在多博主抓取时（FxTwitter 部分失败增量回退至 Nitter 或纯 FxTwitter 模式部分失败），结果列表顺序打乱以及 `UserFetchResult.index` 未精准对齐原始 `accounts` 列表的缺陷；统一按原始账号顺序排序并精准保持索引一致。
+- 修复手动搜索在 FxTwitter 链路上未传递 `sort` 排序模式的问题；现在 `-top` 与 `-last` 均能精准透传 `feed` 参数或在 `mix` 模式下自动路由回退至自建 Nitter。
+- 修复手动查推与热搜无数据或异常分支下的任务审计日志，统一采用 `_log_manual_no_send_task`，并对异常信息和用户名全面执行 `sanitize_sensitive_text` 脱敏。
+- 对齐并精简 `docs/project/configuration.md` 与 `docs/advanced.md` 中关于 `send_batch_summary_enabled`、Tag 分组 `fetch_backend` 模式以及 List 物理隔离的文档说明。
+
 ## [1.5.0] - 2026-09-15
 
 > **💡 1.5.0 运维与配置建议**：

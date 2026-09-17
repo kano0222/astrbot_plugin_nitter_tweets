@@ -136,26 +136,27 @@ class SessionSearchBuffer:
         self.touch()
         return token, [tweet for _key, tweet in reserved]
 
-    def finalize(self, token: str, sent_count: int) -> None:
-        """Commit a sent prefix and restore any unsent suffix at the front."""
+    def finalize(self, token: str, sent_count: int, failed_count: int = 0) -> None:
+        """Commit a sent prefix, drop failed items, and restore any unsent suffix at the front."""
         count = self._coerce_sent_count(sent_count)
+        failed = self._coerce_sent_count(failed_count)
         reserved = self.reservations.pop(str(token), None)
         if reserved is None:
             return
         count = min(count, len(reserved))
         for key, _tweet in reserved[:count]:
             self._item_order.pop(key, None)
-        unsent = reserved[count:]
+        remaining = reserved[count:]
+        failed = min(failed, len(remaining))
+        for key, _tweet in remaining[:failed]:
+            self._item_order.pop(key, None)
+        unsent = remaining[failed:]
         self._restore_items(unsent)
         self.touch()
 
-    def rollback(self, token: str) -> None:
-        """Restore every item in a reservation after an aborted send."""
-        reserved = self.reservations.pop(str(token), None)
-        if reserved is None:
-            return
-        self._restore_items(reserved)
-        self.touch()
+    def rollback(self, token: str, failed_count: int = 0) -> None:
+        """Restore items in a reservation after an aborted send, dropping failed items if any."""
+        self.finalize(token, sent_count=0, failed_count=failed_count)
 
     @staticmethod
     def _coerce_sent_count(value: Any) -> int:

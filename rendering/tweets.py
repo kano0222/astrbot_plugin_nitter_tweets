@@ -1470,3 +1470,35 @@ class TweetMessageRenderer:
     def format_instance_label(instance: str) -> str:
         parsed = urlparse(instance)
         return parsed.netloc or parsed.path or instance
+
+
+def format_twitter_trends(trends: list[dict] | None) -> str:
+    """Format a list of Twitter/X trending topics into a readable message.
+
+    Defensively uses enumerate(trends, 1) to generate numeric ranks, protecting
+    against null or missing rank attributes from the upstream API.
+    """
+    if not trends:
+        return "暂无实时 Twitter/X 热搜趋势，请稍后再试。"
+
+    lines = ["🔥 Twitter/X 实时趋势热搜榜", ""]
+    valid_count = 0
+    for item in trends:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        valid_count += 1
+        context = str(item.get("context") or "").strip()
+        if context:
+            lines.append(f"{valid_count}. {name} ({context})")
+        else:
+            lines.append(f"{valid_count}. {name}")
+
+    if valid_count == 0:
+        return "暂无实时 Twitter/X 热搜趋势，请稍后再试。"
+
+    lines.append("")
+    lines.append("数据来源：FxTwitter / X")
+    return "\n".join(lines)

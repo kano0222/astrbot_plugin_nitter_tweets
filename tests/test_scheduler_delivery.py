@@ -1601,6 +1601,241 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(target, batch.delivered_targets)
         self.assertEqual(sender.sent, [])
 
+    async def test_send_ordinary_batches_summary_enabled_calls_send_summary_to_umo(
+        self,
+    ):
+        target = "telegram:FriendMessage:1"
+        sender = _Sender()
+        scheduler = self._create_scheduler(
+            {
+                "schedule_enabled": True,
+                "push": {"send_batch_summary_enabled": True},
+            },
+            sender=sender,
+        )
+        self.assertTrue(scheduler.send_batch_summary_enabled)
+        batch = scheduler_module.PendingTweetBatch(
+            username="NASA",
+            instance="https://nitter.test",
+            tweets=[self._make_tweet("NASA", "203")],
+            fetched_ids=["203"],
+            seen_ids=["100"],
+        )
+        result = scheduler_module.ScheduledCheckResult(
+            reason="summary_enabled",
+            group_id="global",
+            group_type="blogger",
+            targets=[target],
+        )
+
+        await scheduler._send_per_user_updates(
+            [batch],
+            result,
+            [target],
+            target_interval=0,
+            user_interval=0,
+            batch_summary="📬 默认分组 · 1 位博主 · 1 条新推文",
+            history_group_id="global",
+            history_source="scheduled",
+        )
+
+        self.assertEqual(len(sender.summary_sends), 1)
+        self.assertEqual(
+            sender.summary_sends[0],
+            (target, "📬 默认分组 · 1 位博主 · 1 条新推文"),
+        )
+        self.assertEqual(len(sender.sent), 1)
+
+    async def test_send_ordinary_batches_summary_disabled_suppresses_send_summary_to_umo(
+        self,
+    ):
+        target = "telegram:FriendMessage:1"
+        sender = _Sender()
+        scheduler = self._create_scheduler(
+            {
+                "schedule_enabled": True,
+                "push": {"send_batch_summary_enabled": False},
+            },
+            sender=sender,
+        )
+        self.assertFalse(scheduler.send_batch_summary_enabled)
+        batch = scheduler_module.PendingTweetBatch(
+            username="NASA",
+            instance="https://nitter.test",
+            tweets=[self._make_tweet("NASA", "203")],
+            fetched_ids=["203"],
+            seen_ids=["100"],
+        )
+        result = scheduler_module.ScheduledCheckResult(
+            reason="summary_disabled",
+            group_id="global",
+            group_type="blogger",
+            targets=[target],
+        )
+
+        await scheduler._send_per_user_updates(
+            [batch],
+            result,
+            [target],
+            target_interval=0,
+            user_interval=0,
+            batch_summary="📬 默认分组 · 1 位博主 · 1 条新推文",
+            history_group_id="global",
+            history_source="scheduled",
+        )
+
+        self.assertEqual(sender.summary_sends, [])
+        self.assertEqual(len(sender.sent), 1)
+
+    async def test_send_ordinary_batches_alias_summary_suppressed_when_disabled(self):
+        target = "telegram:FriendMessage:1"
+        sender = _Sender()
+        scheduler = self._create_scheduler(
+            {
+                "schedule_enabled": True,
+                "push": {"send_batch_summary_enabled": False},
+            },
+            sender=sender,
+        )
+        batch = scheduler_module.PendingTweetBatch(
+            username="NASA",
+            instance="https://nitter.test",
+            tweets=[self._make_tweet("NASA", "203")],
+            fetched_ids=["203"],
+            seen_ids=["100"],
+        )
+        result = scheduler_module.ScheduledCheckResult(
+            reason="summary_alias",
+            group_id="global",
+            group_type="blogger",
+            targets=[target],
+        )
+
+        await scheduler._send_ordinary_batches(
+            [batch],
+            result,
+            [target],
+            target_interval=0,
+            user_interval=0,
+            batch_summary="📬 默认分组 · 1 位博主 · 1 条新推文",
+            history_group_id="global",
+            history_source="scheduled",
+        )
+
+        self.assertEqual(sender.summary_sends, [])
+        self.assertEqual(len(sender.sent), 1)
+
+    def test_send_batch_summary_enabled_property_parsing(self):
+        cases = [
+            ({}, True),
+            ({"send_batch_summary_enabled": True}, True),
+            ({"send_batch_summary_enabled": False}, False),
+            ({"push": {"send_batch_summary_enabled": True}}, True),
+            ({"push": {"send_batch_summary_enabled": False}}, False),
+            ({"push": {"send_batch_summary_enabled": "false"}}, False),
+            ({"push": {"send_batch_summary_enabled": "0"}}, False),
+            ({"push": {"send_batch_summary_enabled": "off"}}, False),
+            ({"push": {"send_batch_summary_enabled": "true"}}, True),
+        ]
+        for cfg, expected in cases:
+            with self.subTest(cfg=cfg, expected=expected):
+                scheduler = self._create_scheduler(cfg)
+                self.assertIs(scheduler.send_batch_summary_enabled, expected)
+
+    async def test_run_check_ordinary_batches_summary_enabled_calls_send_summary(self):
+        target = "telegram:FriendMessage:1"
+        nitter = _SchedulerNitter(
+            {
+                "NASA": [
+                    {
+                        "tweets": [self._make_tweet("NASA", "101")],
+                        "scanned_status_ids": ["101", "100"],
+                        "anchor_status_ids": ["101", "100"],
+                    }
+                ]
+            }
+        )
+        sender = _Sender()
+        scheduler = self._create_scheduler(
+            {
+                "schedule_enabled": True,
+                "push": {"send_batch_summary_enabled": True},
+                "tweet_groups": [
+                    {
+                        "group_id": "default",
+                        "name": "默认分组",
+                        "enabled": True,
+                        "watch_users": ["NASA"],
+                        "push_targets": [target],
+                    }
+                ],
+            },
+            nitter=nitter,
+            sender=sender,
+        )
+        await scheduler.storage.migrate_and_sync(
+            scheduler._schedule_groups(log_invalid_targets=False)
+        )
+        await scheduler.storage.add_seen_ids("default", "NASA", ["100"])
+        await scheduler.storage.set_scan_watermark("default", "NASA", ["100"])
+
+        result = await scheduler.run_check(
+            reason="test_summary_enabled_run_check", group_name="default"
+        )
+
+        self.assertEqual(result.new_tweet_count, 1)
+        self.assertEqual(len(sender.summary_sends), 1)
+        self.assertEqual(sender.summary_sends[0][0], target)
+        self.assertIn("1 位博主", sender.summary_sends[0][1])
+        self.assertEqual(len(sender.sent), 1)
+
+    async def test_run_check_ordinary_batches_summary_disabled_suppresses_send_summary(
+        self,
+    ):
+        target = "telegram:FriendMessage:1"
+        nitter = _SchedulerNitter(
+            {
+                "NASA": [
+                    {
+                        "tweets": [self._make_tweet("NASA", "101")],
+                        "scanned_status_ids": ["101", "100"],
+                        "anchor_status_ids": ["101", "100"],
+                    }
+                ]
+            }
+        )
+        sender = _Sender()
+        scheduler = self._create_scheduler(
+            {
+                "schedule_enabled": True,
+                "push": {"send_batch_summary_enabled": False},
+                "tweet_groups": [
+                    {
+                        "group_id": "default",
+                        "name": "默认分组",
+                        "enabled": True,
+                        "watch_users": ["NASA"],
+                        "push_targets": [target],
+                    }
+                ],
+            },
+            nitter=nitter,
+            sender=sender,
+        )
+        await scheduler.storage.migrate_and_sync(
+            scheduler._schedule_groups(log_invalid_targets=False)
+        )
+        await scheduler.storage.add_seen_ids("default", "NASA", ["100"])
+        await scheduler.storage.set_scan_watermark("default", "NASA", ["100"])
+
+        result = await scheduler.run_check(
+            reason="test_summary_disabled_run_check", group_name="default"
+        )
+
+        self.assertEqual(result.new_tweet_count, 1)
+        self.assertEqual(sender.summary_sends, [])
+        self.assertEqual(len(sender.sent), 1)
+
     async def test_post_send_bookkeeping_exception_does_not_add_failed_history(self):
         target = "telegram:FriendMessage:1"
         sender = _RaisingPostSendSender()
@@ -2016,7 +2251,7 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
             {"NASA": ["101", "100"]},
         )
 
-    async def test_media_only_transient_failure_keeps_scan_gap_for_retry(self):
+    async def test_media_only_transient_failure_marks_seen_and_advances_watermark(self):
         target = "telegram:FriendMessage:1"
         nitter = _SchedulerNitter(
             {
@@ -2061,12 +2296,15 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
             reason="test_media_only_retry_first", group_name="media"
         )
 
-        self.assertEqual(first.media_only_retrying, 1)
+        self.assertEqual(first.media_only_skipped, 1)
+        self.assertEqual(first.media_only_retrying, 0)
         self.assertEqual(sender.sent, [])
-        self.assertEqual(await scheduler.storage.get_seen_ids("media", "NASA"), ["100"])
+        self.assertEqual(
+            await scheduler.storage.get_seen_ids("media", "NASA"), ["101", "100"]
+        )
         self.assertEqual(
             await scheduler.storage.get_group_scan_watermarks("media"),
-            {"NASA": ["100"]},
+            {"NASA": ["101", "100"]},
         )
 
         media.statuses["101"] = ("ready", Path("101.jpg"))
@@ -2074,10 +2312,14 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
             reason="test_media_only_retry_second", group_name="media"
         )
 
-        self.assertEqual(second.new_tweet_count, 1)
-        self.assertEqual(sender.media_only_flags, [True])
+        self.assertEqual(second.new_tweet_count, 0)
+        self.assertEqual(sender.sent, [])
         self.assertEqual(
             await scheduler.storage.get_seen_ids("media", "NASA"), ["101", "100"]
+        )
+        self.assertEqual(
+            await scheduler.storage.get_group_scan_watermarks("media"),
+            {"NASA": ["101", "100"]},
         )
 
     async def test_concurrent_prepare_sends_in_completion_order(self):

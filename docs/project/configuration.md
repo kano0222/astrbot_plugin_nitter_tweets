@@ -11,15 +11,24 @@ AstrBot WebUI 的 `tweet_groups` 添加时先选 **博主分组**（`blogger`）
 - `media`: 图片、视频、传输编码、xdown、缓存。
 - `ai_translation`: 翻译。
 - `schedule`: 后台检查总开关和全局频率。
-- `push`: `tweet_groups`、推送间隔、合并阈值和目标级作者黑名单。
+- `push`: `tweet_groups`、推送间隔、合并阈值、批次概括横幅与目标级作者黑名单。
 - `performance`: 后台账号并发拉取和并发准备。
 - `logging`: 日志模式。
 
-## 实例配置
+## 抓取后端与实例配置
 
 | 配置键 | 用途 | 说明 |
 | --- | --- | --- |
+| `fetch_backend`（`basic`） | 推文抓取后端策略 | 可选 `mix`（默认）、`nitter`、`fx`。控制博主与标签推文优先从 FxTwitter 还是自建 Nitter 拉取。 |
 | `instances`（`basic`） | RSS、HTML 搜索、List RSS | 仅填写自建 Nitter，可配多个；无默认公共实例 |
+
+### `fetch_backend` 抓取后端策略
+
+- `mix`（默认，推荐）：博主推文与标签搜索优先调用 FxTwitter API 高速并发拉取；遇超时、429 限流或 404（SafeSearch 拦截）时增量移交自建 Nitter 接盘。
+- `nitter`：完全使用自建 Nitter 实例的 RSS 与 HTML 搜索管道，不依赖第三方公共 API。
+- `fx`：博主与标签搜索仅走 FxTwitter API，失败时不向自建 Nitter 回退。
+
+> **详细原理与架构约束**（包括 List 物理隔离、转推守卫 Retweet Guard、Tag SafeSearch 回退等细节）：参见 [进阶说明 - 抓取后端策略](../advanced.md#抓取后端策略fetch_backend)。
 
 同一自建实例同时承担 RSS 和 HTML。旧版 `search_instances`、`blogger_html_instances`、`concurrent_fetch_instances` 已删除，仅在启动日志中提示，不读取、不迁移、不写回。
 
@@ -39,7 +48,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 - `name`: 显示名，可用于命令。
 - `group_id`: 存储 ID。新建默认分组为 `default`；由插件自动分配并保持稳定，已有值（包括旧 `global`）保留。缺失时，安全英文数字分组名会作为旧 ID 继承，否则自动补齐为 `group_N`。
-- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag 组通过 HTML 搜索；List 组优先走 RSS（`/i/lists/<id>/rss`），失败回退 HTML 翻页。
+- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag 组抓取由 `fetch_backend` 决定，`mix` 和 `fx` 模式优先走 FxTwitter（仅 `mix` 模式在失败时回退至 Nitter HTML 搜索，`fx` 模式不回退）；List 组物理隔离强制走自建 Nitter（优先走 RSS `/i/lists/<id>/rss`，失败回退 HTML 翻页）。
 - `enabled`: 是否启用。
 - `watch_users`: **Blogger 组**博主订阅源；其他类型忽略。
 - `watch_queries`: **Tag 组**搜索订阅列表。**落盘为字符串列表**（如 `#圣娅`、`蔚蓝档案`）。前导 `#` → tag，否则 phrase；phrase 禁止自动加 `#`。仍可读旧 `{query,type}` 对象，但会规范成字符串，避免 AstrBot `list` 显示 `[object Object]`。
@@ -63,14 +72,30 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 全局推送：
 
-- `manual_send_interval`（默认 `0`）：手动命令逐条发送间隔秒数。
-- `target_blocked_users`：隐藏列表配置，每项为完整 UMO 与其用户名列表；同一目标跨多个分组共享，命令和 Dashboard 维护，发送阶段按目标过滤。目标 UMO 需完整格式（如 `aiocqhttp:GroupMessage:123`）。
+| 配置键 | 默认 | 说明 |
+| --- | --- | --- |
+| `send_batch_summary_enabled` | `true` | 非合并普通推送时是否发送概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，阻断发送单独的概括消息；QQ 合并转发整包发送时不使用本项。 |
+| `manual_send_interval` | `0` | 手动命令逐条发送间隔秒数。 |
+| `target_blocked_users` | `[]` | 隐藏列表配置，每项为完整 UMO 与其用户名列表；同一目标跨多个分组共享，命令和 Dashboard 维护，发送阶段按目标过滤。目标 UMO 需完整格式（如 `aiocqhttp:GroupMessage:123`）。 |
+
+### `send_batch_summary_enabled` 批次概括横幅控制
+
+- **解决痛点（Close #74）**：普通逐条推送（非合并转发）时，调度器默认会在推文卡片前先发送一条批次概括横幅（如“📬 默认分组 · 1 位博主 · 1 条新推文”）。部分推送群聊希望降低刷屏干扰，仅接收推文卡片本身。
+- **实现机制**：在普通逐条推送发送流程（`runner_send`）中，当该配置项为 `false` 时，动态将目标批次概括内容置空，从而直接阻断发送单独的概括横幅消息。
+- **合并转发差异**：私人号 OneBot 满足 `merge_tweet_threshold` 触发合并转发时，概括横幅作为整包的头部索引节点保留，不受该开关影响。
+
+### `forward_reject_plain_fallback_enabled` 风控拒收回退控制
+
+- **解决痛点**：在 QQ (OneBot/NapCat) 环境下，合并转发因包含大尺度 Coser 敏感图片等触发平台内容风控（如 `retcode 1200 / res_id 失败`）被拒收时，默认的纯文本保底容易在群聊中刷出突兀的未带图链接，且加剧风控风险。
+- **行为契约**：
+  - `false`（默认）：风控拒收时不发送纯文本降级消息，直接略过违规推文，并将相关推文 ID 记入 `delivered_status_ids` 写入 SQLite `seen` 推进水位，避免敏感链接刷屏，同时彻底防止下一轮重复拉取重试；
+  - `true`：保留原有行为，合并转发被拒收后向群内发送一条包含推文文字与直链的纯文本降级消息。
 
 `watch_users` 和 `push_targets` 顶层字段是旧版兼容字段，启动后迁移到默认分组。
 
 后台**博主**检查固定扫描 RSS 首屏约 20 条；首屏未命中上次最多 20 个扫描基准 ID 时按 `Min-Id` 翻页直到命中任意基准，然后按推文 ID 与 seen 做差集并发送全部新推文。旧配置中的 `scheduled_fetch_limit` 会在迁移时清理，不再作为运行参数。
 
-后台**Tag**检查：每个 `watch_query` 走 `instances` 的 HTML 搜索，组内串行、订阅源之间按 `send_user_interval` 等待。首轮最多取 20 条建立基准；已有水位时本轮扫描可超过 20 条，并按 `html_max_pages` 翻页到旧水位或游标结束，持久化水位仍最多保存 20 个 ID。达到页数上限仍未命中旧基准时，`max_tweets_per_check=0` 会跳过推送并自动重建当前第一页基准，正数会按上限推送后再重建；首屏没有有效状态 ID、发送准备失败或基准写入失败时保留旧水位，发送调用失败则跳过当前批次并推进 seen。按全局和分组双层开关决定是否过滤转发，可选纯文本/仅媒体，再与 seen（`q:...`）差集后发送新帖（`max_tweets_per_check > 0` 时按该上限截断，默认不限制）。首次有可用结果只 init 不推历史；真正空首轮不初始化 seen 或扫描水位；有原始结果但全被过滤时记录空扫描水位。
+后台**Tag**检查：每个 `watch_query` 的检索路由由 `fetch_backend` 决定：在 `mix`（默认）或 `fx` 模式下优先使用 FxTwitter 接口搜索，且仅在 `mix` 模式遇到 SafeSearch 404、限流或故障时平滑回退至自建 Nitter HTML 搜索；`nitter` 模式则固定使用 `instances` 的 HTML 搜索。组内串行、订阅源之间按 `send_user_interval` 等待。首轮最多取 20 条建立基准；已有水位时本轮扫描可超过 20 条，并按 `html_max_pages` 翻页到旧水位或游标结束，持久化水位仍最多保存 20 个 ID。达到页数上限仍未命中旧基准时，`max_tweets_per_check=0` 会跳过推送并自动重建当前第一页基准，正数会按上限推送后再重建；首屏没有有效状态 ID、发送准备失败或基准写入失败时保留旧水位，发送调用失败则跳过当前批次并推进 seen。按全局和分组双层开关决定是否过滤转发，可选纯文本/仅媒体，再与 seen（`q:...`）差集后发送新帖（`max_tweets_per_check > 0` 时按该上限截断，默认不限制）。首次有可用结果只 init 不推历史；真正空首轮不初始化 seen 或扫描水位；有原始结果但全被过滤时记录空扫描水位。
 
 后台**List**检查：每个 `watch_list` 优先走 `instances` 的 List RSS（`/i/lists/<id>/rss`，单次约 100 条，含 `Min-Id` 增量游标），按 `Min-Id` 分页到旧水位（同 Blogger RSS）；RSS 发生网络/HTTP 异常或扫描未完成时回退 HTML 翻页（同 Tag 的 `html_max_pages` 约束），扫描完成无新推文时不触发回退。其余过滤、纯文本/仅媒体、`max_tweets_per_check` 和首轮初始化行为与 Tag 一致，seen 键为 `list:<id>`。
 

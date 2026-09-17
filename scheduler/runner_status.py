@@ -94,9 +94,22 @@ class SchedulerStatusMixin:
             config_get(self.config, "filter_reposts_enabled", True),
             True,
         )
+        backend = (
+            getattr(self, "fetch_backend", None)
+            or config_get(getattr(self, "config", {}), "fetch_backend", "mix")
+            or "mix"
+        )
+        backend_str = str(backend).strip().lower()
+        if backend_str == "fx":
+            backend_desc = "fx (纯 FxTwitter API 抓取)"
+        elif backend_str == "nitter":
+            backend_desc = "nitter (纯自建 Nitter 实例抓取)"
+        else:
+            backend_desc = "mix (FxTwitter 优先 + 自建 Nitter 容灾)"
         lines = [
             "Nitter 定时检查状态",
             f"调度器: {'运行中' if self.is_running else '未运行'}",
+            f"抓取策略: {backend_desc}",
             f"总开关: {'已启用' if self.schedule_enabled else '已关闭'}",
             (
                 "全局检查间隔: "
