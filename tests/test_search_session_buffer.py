@@ -104,3 +104,37 @@ def test_known_id_pruning_keeps_ids_in_active_reservations():
     # while the first reservation is still in flight.
     assert buf.add_tweets([_t(reserved_id)]) == 0
     buf.rollback(token)
+
+
+def test_finalize_drops_failed_items_and_restores_unsent_suffix():
+    buf = SessionSearchBuffer()
+    buf.add_tweets([_t("1"), _t("2"), _t("3")])
+    token, reserved = buf.reserve(3)
+    assert [item.status_id for item in reserved] == ["1", "2", "3"]
+
+    # 1 sent, 1 failed (tweet "2"), 1 unsent (tweet "3")
+    buf.finalize(token, sent_count=1, failed_count=1)
+
+    # Tweet "2" should be dropped; "3" should be restored
+    remaining = buf.take(10)
+    assert [item.status_id for item in remaining] == ["3"]
+    # Tweet "2" must remain in known_ids to prevent re-fetching/re-adding
+    assert "2" in buf.known_ids
+    assert buf.add_tweets([_t("2")]) == 0
+
+
+def test_rollback_drops_failed_items_and_restores_unsent_suffix():
+    buf = SessionSearchBuffer()
+    buf.add_tweets([_t("1"), _t("2"), _t("3")])
+    token, reserved = buf.reserve(3)
+    assert [item.status_id for item in reserved] == ["1", "2", "3"]
+
+    # Aborted send with first item failed
+    buf.rollback(token, failed_count=1)
+
+    # Tweet "1" should be dropped; "2" and "3" should be restored
+    remaining = buf.take(10)
+    assert [item.status_id for item in remaining] == ["2", "3"]
+    # Tweet "1" must remain in known_ids
+    assert "1" in buf.known_ids
+    assert buf.add_tweets([_t("1")]) == 0

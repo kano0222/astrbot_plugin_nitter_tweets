@@ -2251,7 +2251,7 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
             {"NASA": ["101", "100"]},
         )
 
-    async def test_media_only_transient_failure_keeps_scan_gap_for_retry(self):
+    async def test_media_only_transient_failure_marks_seen_and_advances_watermark(self):
         target = "telegram:FriendMessage:1"
         nitter = _SchedulerNitter(
             {
@@ -2296,12 +2296,15 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
             reason="test_media_only_retry_first", group_name="media"
         )
 
-        self.assertEqual(first.media_only_retrying, 1)
+        self.assertEqual(first.media_only_skipped, 1)
+        self.assertEqual(first.media_only_retrying, 0)
         self.assertEqual(sender.sent, [])
-        self.assertEqual(await scheduler.storage.get_seen_ids("media", "NASA"), ["100"])
+        self.assertEqual(
+            await scheduler.storage.get_seen_ids("media", "NASA"), ["101", "100"]
+        )
         self.assertEqual(
             await scheduler.storage.get_group_scan_watermarks("media"),
-            {"NASA": ["100"]},
+            {"NASA": ["101", "100"]},
         )
 
         media.statuses["101"] = ("ready", Path("101.jpg"))
@@ -2309,10 +2312,14 @@ class SchedulerDeliveryTest(unittest.IsolatedAsyncioTestCase):
             reason="test_media_only_retry_second", group_name="media"
         )
 
-        self.assertEqual(second.new_tweet_count, 1)
-        self.assertEqual(sender.media_only_flags, [True])
+        self.assertEqual(second.new_tweet_count, 0)
+        self.assertEqual(sender.sent, [])
         self.assertEqual(
             await scheduler.storage.get_seen_ids("media", "NASA"), ["101", "100"]
+        )
+        self.assertEqual(
+            await scheduler.storage.get_group_scan_watermarks("media"),
+            {"NASA": ["101", "100"]},
         )
 
     async def test_concurrent_prepare_sends_in_completion_order(self):

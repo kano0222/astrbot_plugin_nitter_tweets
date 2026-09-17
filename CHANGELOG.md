@@ -23,6 +23,9 @@
 
 ### Fixed
 
+- 修复仅媒体推文准备失败（如视频过大下载超时、格式损坏等）未写入 seen 导致定时调度进入死循环反复重推的问题；现在失败时直接写入 seen 并推进扫描水位线，并在日志中输出画质与大小配置调优建议。
+- 修复推文搜索会话缓存池（`SessionSearchBuffer`）在首条推文发送失败时重新插回队首导致后续搜索卡死的问题；增加 `failed_count` 参数将失败项从队列移出（保留在 `known_ids` 中防重复抓取），安全保留未尝试的后续推文。
+- 优化发送状态不确定（`_log_uncertain_delivery` / `UNCERTAIN_DELIVERY_WARNING`）及视频下载超时的警告日志，针对大文件/视频超时追加明确的 WebUI 配置调优建议（提示调整 `media_quality` 或 `media_max_size_mb`）。
 - 修复调度器在多博主抓取时（FxTwitter 部分失败增量回退至 Nitter 或纯 FxTwitter 模式部分失败），结果列表顺序打乱以及 `UserFetchResult.index` 未精准对齐原始 `accounts` 列表的缺陷；统一按原始账号顺序排序并精准保持索引一致。
 - 修复手动搜索在 FxTwitter 链路上未传递 `sort` 排序模式的问题；现在 `-top` 与 `-last` 均能精准透传 `feed` 参数或在 `mix` 模式下自动路由回退至自建 Nitter。
 - 修复手动查推与热搜无数据或异常分支下的任务审计日志，统一采用 `_log_manual_no_send_task`，并对异常信息和用户名全面执行 `sanitize_sensitive_text` 脱敏。

@@ -305,9 +305,19 @@ class MediaService(MediaCacheMixin):
                         tweet, f"图片下载失败，已保留原文链接：{exc}"
                     )
                 transient_failure = True
+                timeout_hint = ""
+                if media.is_video and (
+                    isinstance(exc, TimeoutError)
+                    or "timeout" in str(exc).lower()
+                    or "timed out" in str(exc).lower()
+                ):
+                    timeout_hint = (
+                        "；若因视频过大或下载超时，建议在配置中将「媒体画质偏好」(media_quality) "
+                        "设为 medium/low，或调小「单个媒体大小上限 MB」(media_max_size_mb)"
+                    )
                 logger.warning(
                     "[NitterTweets] 媒体下载失败: "
-                    f"url={_safe_url(media.url)}, error={_safe_text(exc)}"
+                    f"url={_safe_url(media.url)}, error={_safe_text(exc)}{timeout_hint}"
                 )
                 continue
             downloaded.append(media)
@@ -373,10 +383,20 @@ class MediaService(MediaCacheMixin):
                 last_error = exc
                 if attempt >= attempts:
                     break
+                timeout_hint = ""
+                if media.is_video and (
+                    isinstance(exc, TimeoutError)
+                    or "timeout" in str(exc).lower()
+                    or "timed out" in str(exc).lower()
+                ):
+                    timeout_hint = (
+                        "；若因视频过大或下载超时，建议在配置中将「媒体画质偏好」(media_quality) "
+                        "设为 medium/low，或调小「单个媒体大小上限 MB」(media_max_size_mb)"
+                    )
                 logger.warning(
                     "[NitterTweets] 媒体下载失败，准备重试: "
                     f"url={_safe_url(media.url)}, attempt={attempt}/{attempts}, "
-                    f"delay={delay:g}s, error={_safe_text(exc)}"
+                    f"delay={delay:g}s, error={_safe_text(exc)}{timeout_hint}"
                 )
                 if delay > 0:
                     time.sleep(delay)

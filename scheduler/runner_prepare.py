@@ -429,11 +429,20 @@ class SchedulerPrepareMixin:
             )
             return
 
-        result.media_only_retrying += 1
+        result.media_only_skipped += 1
+        if status_id:
+            await self._store_incremental_seen_ids(
+                group_id,
+                batch.username,
+                [status_id],
+                seen_map,
+            )
         logger.warning(
-            "[NitterTweets] 仅媒体推文暂未准备好，下轮重试: "
+            "[NitterTweets] 仅媒体推文准备失败，已标记已读跳过以避免死循环重推: "
             f"source={source_label}, status={status_id}, "
-            f"status={status}, error={error or 'no media'}"
+            f"status={status}, error={error or 'no media'}。"
+            "（若因视频过大或下载超时，建议在配置中将「媒体画质偏好」(media_quality) 设为 medium/low，"
+            "或调小「单个媒体大小上限 MB」(media_max_size_mb)）"
         )
 
     @staticmethod

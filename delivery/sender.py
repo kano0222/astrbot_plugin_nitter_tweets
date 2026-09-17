@@ -82,7 +82,11 @@ class TweetSender(
     # When NapCat/OneBot rejects a forward (often retcode 1200 / res_id fail),
     # recursively split the tweet list and retry smaller merges.
     FORWARD_SPLIT_MIN_TWEETS = 1
-    UNCERTAIN_DELIVERY_WARNING = "发送状态不确定，已跳过降级重试。"
+    UNCERTAIN_DELIVERY_WARNING = (
+        "发送状态不确定，已跳过降级重试"
+        "（若因大文件/视频发送超时，建议在配置中将「媒体画质偏好」(media_quality) "
+        "设为 medium/low，或调小「单个媒体大小上限 MB」(media_max_size_mb)）。"
+    )
     forward_reject_plain_fallback_enabled: bool = False
 
     def __init__(self, config=None):
@@ -508,13 +512,23 @@ class TweetSender(
             return True
         return False
 
-    @staticmethod
+    @classmethod
     def _log_uncertain_delivery(
+        cls,
         label: str = "",
         target: str = "",
         exc: Exception | None = None,
     ) -> None:
-        logger.warning("[NitterTweets] 发送状态不确定，跳过降级重试")
+        advice = ""
+        if exc is not None and (
+            cls._is_uncertain_delivery_error(exc)
+            or cls._error_chain_contains_timeout(exc)
+        ):
+            advice = (
+                "；若因大文件/视频发送超时，建议在配置中将「媒体画质偏好」(media_quality) "
+                "设为 medium/low，或调小「单个媒体大小上限 MB」(media_max_size_mb)"
+            )
+        logger.warning(f"[NitterTweets] 发送状态不确定，跳过降级重试{advice}")
         if label or target or exc is not None:
             logger.debug(
                 "[NitterTweets] 发送状态不确定详情: "

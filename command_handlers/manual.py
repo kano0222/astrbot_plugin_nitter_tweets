@@ -373,7 +373,7 @@ class ManualCommandMixin:
             if sent_progress[0] > 0:
                 buf.finalize(token, sent_progress[0])
             else:
-                buf.rollback(token)
+                buf.rollback(token, failed_count=1)
 
         # Pure buffer hit: no network — skip cooldown burn for short fun use.
         if len(buf) >= limit:
@@ -396,7 +396,11 @@ class ManualCommandMixin:
             except BaseException:
                 abort_reservation(reservation_token)
                 raise
-            buf.finalize(reservation_token, sent_count)
+            buf.finalize(
+                reservation_token,
+                sent_count,
+                failed_count=1 if sent_count < len(tweets) else 0,
+            )
             self._log_manual_send_task(
                 "推文搜索完成",
                 operation="tweet_search",
@@ -569,7 +573,11 @@ class ManualCommandMixin:
         except BaseException:
             abort_reservation(reservation_token)
             raise
-        buf.finalize(reservation_token, sent_count)
+        buf.finalize(
+            reservation_token,
+            sent_count,
+            failed_count=1 if sent_count < len(tweets) else 0,
+        )
         self._log_manual_send_task(
             "推文搜索完成",
             operation="tweet_search",
