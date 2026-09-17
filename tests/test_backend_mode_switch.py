@@ -5,6 +5,7 @@ incremental Nitter fallback, and physical isolation of Twitter Lists.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1395,3 +1396,33 @@ async def test_manual_search_buffer_delivery_failure_drops_failed_tweet():
     assert len(buf) == 1
     remaining = buf.take(2)
     assert [t.status_id for t in remaining] == ["2002"]
+
+
+@pytest.mark.asyncio
+async def test_manual_search_buffer_cancelled_before_delivery_preserves_reserved_tweets():
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_buffer_cancelled"
+    event.plain_result.side_effect = lambda v: v
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+
+    session_id = host._search_session_id(event)
+    store = host._get_search_session_store()
+    query_key = host._search_query_key("birds", "")
+    buf = store.get_or_create(session_id, query_key)
+    buf.add_tweets([_make_tweet("user", "3001"), _make_tweet("user", "3002")])
+    assert len(buf) == 2
+
+    # event.send succeeds, but _send_tweets_response is cancelled before any progress
+    host._send_tweets_response = AsyncMock(side_effect=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        await host._cmd_tweet_search_impl(event, "birds 2")
+
+    # Cancelled before any progress -> all 2 tweets must be preserved in buffer (failed_count=0)
+    assert len(buf) == 2
+    remaining = buf.take(2)
+    assert [t.status_id for t in remaining] == ["3001", "3002"]

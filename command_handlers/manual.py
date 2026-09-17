@@ -398,6 +398,9 @@ class ManualCommandMixin:
                     tweets,
                     on_sent_progress=record_sent_progress,
                 )
+            except asyncio.CancelledError:
+                abort_reservation(reservation_token, failed_count=0)
+                raise
             except BaseException:
                 abort_reservation(reservation_token, failed_count=1)
                 raise
@@ -575,8 +578,11 @@ class ManualCommandMixin:
                 tweets,
                 on_sent_progress=record_sent_progress,
             )
+        except asyncio.CancelledError:
+            abort_reservation(reservation_token, failed_count=0)
+            raise
         except BaseException:
-            abort_reservation(reservation_token)
+            abort_reservation(reservation_token, failed_count=1)
             raise
         buf.finalize(
             reservation_token,
