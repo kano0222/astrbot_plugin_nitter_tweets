@@ -196,8 +196,10 @@ def format_subscription_source(source: str, group_type: str = "blogger") -> str:
 
 
 URL_LIKE_RE = re.compile(
-    r"(?i)(?<![@\w])(?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}"
-    r"(?:/[^\s<>()]*)?"
+    r"(?i)(?<![@\w])(?:"
+    r"https?://[^\s<>()]+"
+    r"|(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?(?:/[^\s<>()]*)?"
+    r")"
 )
 PIPED_WATCH_RE = re.compile(
     r"(?i)\b(?:https?://)?(?:www\.)?piped\.video/watch\?v=([A-Za-z0-9_-]+)"
@@ -206,6 +208,9 @@ PIPED_WATCH_RE = re.compile(
 PIPED_SHORT_RE = re.compile(
     r"(?i)\b(?:https?://)?(?:www\.)?piped\.video/([A-Za-z0-9_-]+)"
     r"(?:[^\s<>()]*)?"
+)
+NITTER_STATUS_URL_RE = re.compile(
+    r"(?i)(?<![@\w])https?://(?:localhost|127\.0\.0\.1|[\w.-]+)(?::\d+)?/([A-Za-z0-9_]{1,15})/status(?:es)?/(\d+)(?:#\w+)?"
 )
 TRAILING_URL_PUNCT = ".,;:!?)）】』」\"'"
 
@@ -238,6 +243,7 @@ def clean_text(raw: str) -> str:
 def normalize_external_links(text: str) -> str:
     text = PIPED_WATCH_RE.sub(r"https://youtu.be/\1", text or "")
     text = PIPED_SHORT_RE.sub(r"https://youtu.be/\1", text)
+    text = NITTER_STATUS_URL_RE.sub(r"https://x.com/\1/status/\2", text)
     return text
 
 
@@ -259,7 +265,9 @@ def strip_external_links(text: str) -> str:
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in stripped.splitlines()]
     cleaned: list[str] = []
     for line in lines:
-        if line or (cleaned and cleaned[-1]):
+        if line and not re.fullmatch(r"^[—–―]+\s*$", line):
+            cleaned.append(line)
+        elif not line and cleaned and cleaned[-1]:
             cleaned.append(line)
     while cleaned and not cleaned[-1]:
         cleaned.pop()

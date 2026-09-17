@@ -205,6 +205,22 @@ class ManualCommandMixin:
         op_name = "user_media" if is_media_only else "user_timeline"
 
         fx = self._get_fxtwitter_client()
+        effective_filter_reposts = bool(
+            getattr(
+                self,
+                "filter_reposts_enabled",
+                config_get(getattr(self, "config", {}), "filter_reposts_enabled", True),
+            )
+        )
+        effective_max_pages = int(
+            getattr(
+                self,
+                "html_max_pages",
+                config_get(getattr(self, "config", {}), "html_max_pages", 3),
+            )
+            or 3
+        )
+
         if backend in ("mix", "fx") and fx is not None:
             try:
                 fx_tweets, _ = await asyncio.to_thread(
@@ -212,7 +228,8 @@ class ManualCommandMixin:
                     username,
                     count=int(limit),
                     skip_plain_text=is_media_only,
-                    filter_reposts=is_media_only,
+                    filter_reposts=effective_filter_reposts,
+                    max_pages=effective_max_pages,
                 )
                 instance = "FxTwitter"
                 tweets = fx_tweets
@@ -247,7 +264,7 @@ class ManualCommandMixin:
                 self.nitter.begin_run_host_skip()
             try:
                 try:
-                    fetch_kwargs = {"filter_reposts": False}
+                    fetch_kwargs = {"filter_reposts": effective_filter_reposts}
                     if is_media_only:
                         fetch_kwargs["skip_plain_text"] = True
                     nitter_inst, tweets = await self.nitter.fetch_user(
@@ -256,7 +273,7 @@ class ManualCommandMixin:
                     instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
                 except TypeError:
                     nitter_inst, tweets = await self.nitter.fetch_user(
-                        username, limit, filter_reposts=False
+                        username, limit, filter_reposts=effective_filter_reposts
                     )
                     instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
                     if is_media_only and tweets:
