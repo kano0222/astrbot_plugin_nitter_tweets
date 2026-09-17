@@ -369,11 +369,11 @@ class ManualCommandMixin:
             # accepted. Preserve that prefix when finalizing the reservation.
             sent_progress[0] = max(sent_progress[0], int(count))
 
-        def abort_reservation(token: str) -> None:
+        def abort_reservation(token: str, failed_count: int = 1) -> None:
             if sent_progress[0] > 0:
                 buf.finalize(token, sent_progress[0])
             else:
-                buf.rollback(token, failed_count=1)
+                buf.rollback(token, failed_count=failed_count)
 
         # Pure buffer hit: no network — skip cooldown burn for short fun use.
         if len(buf) >= limit:
@@ -386,6 +386,11 @@ class ManualCommandMixin:
                         f"（缓存剩余 {len(buf)}）。"
                     )
                 )
+            except BaseException:
+                abort_reservation(reservation_token, failed_count=0)
+                raise
+
+            try:
                 sent_count = await self._send_tweets_response(
                     event,
                     query,
@@ -394,7 +399,7 @@ class ManualCommandMixin:
                     on_sent_progress=record_sent_progress,
                 )
             except BaseException:
-                abort_reservation(reservation_token)
+                abort_reservation(reservation_token, failed_count=1)
                 raise
             buf.finalize(
                 reservation_token,

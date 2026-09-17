@@ -48,7 +48,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 - `name`: 显示名，可用于命令。
 - `group_id`: 存储 ID。新建默认分组为 `default`；由插件自动分配并保持稳定，已有值（包括旧 `global`）保留。缺失时，安全英文数字分组名会作为旧 ID 继承，否则自动补齐为 `group_N`。
-- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag 组抓取由 `fetch_backend` 决定，`mix` 和 `fx` 模式优先走 FxTwitter，并在需要时回退至 Nitter HTML 搜索；List 组物理隔离强制走自建 Nitter（优先走 RSS `/i/lists/<id>/rss`，失败回退 HTML 翻页）。
+- `group_type`: `blogger`（默认）、`tag` 或 `list`。创建后锁定；决定使用哪类订阅字段。Tag 组抓取由 `fetch_backend` 决定，`mix` 和 `fx` 模式优先走 FxTwitter（仅 `mix` 模式在失败时回退至 Nitter HTML 搜索，`fx` 模式不回退）；List 组物理隔离强制走自建 Nitter（优先走 RSS `/i/lists/<id>/rss`，失败回退 HTML 翻页）。
 - `enabled`: 是否启用。
 - `watch_users`: **Blogger 组**博主订阅源；其他类型忽略。
 - `watch_queries`: **Tag 组**搜索订阅列表。**落盘为字符串列表**（如 `#圣娅`、`蔚蓝档案`）。前导 `#` → tag，否则 phrase；phrase 禁止自动加 `#`。仍可读旧 `{query,type}` 对象，但会规范成字符串，避免 AstrBot `list` 显示 `[object Object]`。

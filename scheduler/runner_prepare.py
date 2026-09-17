@@ -13,7 +13,11 @@ from astrbot.api import logger
 
 try:
     from ..config import media_only_unavailable_reason
-    from ..shared import TweetItem, format_subscription_source
+    from ..shared import (
+        TweetItem,
+        format_subscription_source,
+        sanitize_diagnostic,
+    )
     from ..shared.media_status import (
         MEDIA_STATUS_NO_CANDIDATE,
         MEDIA_STATUS_POLICY_SKIPPED,
@@ -37,7 +41,11 @@ except ImportError:
         ScheduledCheckResult,
         SchedulerTaskError,
     )
-    from shared import TweetItem, format_subscription_source
+    from shared import (
+        TweetItem,
+        format_subscription_source,
+        sanitize_diagnostic,
+    )
     from shared.media_status import (
         MEDIA_STATUS_NO_CANDIDATE,
         MEDIA_STATUS_POLICY_SKIPPED,
@@ -437,10 +445,11 @@ class SchedulerPrepareMixin:
                 [status_id],
                 seen_map,
             )
+        safe_error = sanitize_diagnostic(error) if error else "no media"
         logger.warning(
             "[NitterTweets] 仅媒体推文准备失败，已标记已读跳过以避免死循环重推: "
             f"source={source_label}, status={status_id}, "
-            f"status={status}, error={error or 'no media'}。"
+            f"status={status}, error={safe_error}。"
             "（若因视频过大或下载超时，建议在配置中将「媒体画质偏好」(media_quality) 设为 medium/low，"
             "或调小「单个媒体大小上限 MB」(media_max_size_mb)）"
         )

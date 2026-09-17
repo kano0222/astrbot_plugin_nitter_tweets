@@ -71,7 +71,7 @@ async def test_media_download_video_timeout_logs_tuning_advice():
         side_effect=TimeoutError("The read operation timed out"),
     ):
         with patch("media_support.service.logger.warning") as mock_warn:
-            downloaded, status = await service._resolve_and_download_with_status(tweet)
+            downloaded, _ = await service._resolve_and_download_with_status(tweet)
             assert downloaded == []
             assert mock_warn.called
             warn_calls = [call[0][0] for call in mock_warn.call_args_list]
@@ -95,7 +95,7 @@ async def test_media_download_image_timeout_does_not_log_video_advice():
         side_effect=TimeoutError("The read operation timed out"),
     ):
         with patch("media_support.service.logger.warning") as mock_warn:
-            downloaded, status = await service._resolve_and_download_with_status(tweet)
+            downloaded, _ = await service._resolve_and_download_with_status(tweet)
             assert downloaded == []
             assert mock_warn.called
             warn_calls = [call[0][0] for call in mock_warn.call_args_list]

@@ -1331,3 +1331,67 @@ def test_get_fxtwitter_client_resolution():
     runner4.nitter = MagicMock()
     runner4.nitter.fxtwitter = None
     assert runner4._get_fxtwitter_client() is None
+
+
+@pytest.mark.asyncio
+async def test_manual_search_buffer_notice_failure_preserves_reserved_tweets():
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_buffer_fail"
+    event.plain_result.side_effect = lambda v: v
+    event.stop_event = MagicMock()
+
+    # Pre-populate session buffer with 2 tweets
+    session_id = host._search_session_id(event)
+    store = host._get_search_session_store()
+    query_key = host._search_query_key("cats", "")
+    buf = store.get_or_create(session_id, query_key)
+    buf.add_tweets([_make_tweet("user", "1001"), _make_tweet("user", "1002")])
+    assert len(buf) == 2
+
+    # Simulate event.send failing on the preliminary cache-notice message
+    event.send = AsyncMock(side_effect=RuntimeError("connection dropped"))
+    host._send_tweets_response = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="connection dropped"):
+        await host._cmd_tweet_search_impl(event, "cats 2")
+
+    # Tweet response should never have been attempted
+    host._send_tweets_response.assert_not_called()
+
+    # Buffer must preserve all reserved tweets without dropping any (failed_count=0)
+    assert len(buf) == 2
+    remaining = buf.take(2)
+    assert [t.status_id for t in remaining] == ["1001", "1002"]
+
+
+@pytest.mark.asyncio
+async def test_manual_search_buffer_delivery_failure_drops_failed_tweet():
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.unified_msg_origin = "session:test_buffer_fail_delivery"
+    event.plain_result.side_effect = lambda v: v
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+
+    session_id = host._search_session_id(event)
+    store = host._get_search_session_store()
+    query_key = host._search_query_key("dogs", "")
+    buf = store.get_or_create(session_id, query_key)
+    buf.add_tweets([_make_tweet("user", "2001"), _make_tweet("user", "2002")])
+    assert len(buf) == 2
+
+    # event.send succeeds, but _send_tweets_response fails
+    host._send_tweets_response = AsyncMock(side_effect=RuntimeError("delivery failed"))
+
+    with pytest.raises(RuntimeError, match="delivery failed"):
+        await host._cmd_tweet_search_impl(event, "dogs 2")
+
+    # 1 failed tweet should be dropped, remaining 1 preserved
+    assert len(buf) == 1
+    remaining = buf.take(2)
+    assert [t.status_id for t in remaining] == ["2002"]
