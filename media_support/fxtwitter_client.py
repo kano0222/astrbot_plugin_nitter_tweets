@@ -197,6 +197,7 @@ class FxTwitterClient:
         filter_reposts: bool = True,
         cursor: str | None = None,
         max_pages: int = 3,
+        media_filter: str = "",
     ) -> tuple[list[TweetItem], str | None]:
         clean_user = username.strip().lstrip("@")
         if not clean_user:
@@ -205,6 +206,12 @@ class FxTwitterClient:
         target_count = max(0, int(count))
         if target_count == 0:
             return [], None
+
+        mf = str(media_filter or "").strip().lower()
+        if mf == "video":
+            skip_plain_text = True
+        elif mf in ("image", "photo"):
+            skip_plain_text = True
 
         # 转推守卫：仅当 skip_plain_text=True 且 filter_reposts=True 时允许调用 /media；
         # 若 filter_reposts=False，必须调用 /statuses 并在本地过滤纯文本，防止转推媒体丢失；
@@ -239,6 +246,12 @@ class FxTwitterClient:
             if not raw_results:
                 break
 
+            if not last_cursor or last_cursor == current_cursor:
+                cursor_stalled = True
+            elif current_cursor is None and last_cursor:
+                # 初始页（未传入游标）拿到的游标若非空，继续下一页循环时若需要可作为 current_cursor
+                pass
+
             for raw in raw_results:
                 tweet = self._tweet_from_payload(raw)
                 if tweet is None:
@@ -246,16 +259,18 @@ class FxTwitterClient:
                 # 转推过滤
                 if filter_reposts and tweet.is_retweet:
                     continue
-                # 纯文本过滤
-                if skip_plain_text and not tweet.media:
+                # 媒体类型过滤
+                if mf == "video":
+                    if not any(m.is_video for m in tweet.media):
+                        continue
+                elif mf in ("image", "photo"):
+                    if not any(m.is_image for m in tweet.media):
+                        continue
+                elif skip_plain_text and not tweet.media:
                     continue
                 accumulated.append(tweet)
 
-            if last_cursor and last_cursor == current_cursor:
-                cursor_stalled = True
-                break
-
-            if len(accumulated) >= target_count or not last_cursor:
+            if cursor_stalled or len(accumulated) >= target_count:
                 break
             current_cursor = last_cursor
 

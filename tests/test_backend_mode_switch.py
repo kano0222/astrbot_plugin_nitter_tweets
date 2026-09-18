@@ -1508,3 +1508,44 @@ async def test_scheduler_fetch_passes_configured_html_max_pages():
     mock_fx.fetch_user_timeline.assert_called_once_with(
         "alice", count=10, skip_plain_text=False, filter_reposts=True, max_pages=5
     )
+
+
+@pytest.mark.asyncio
+async def test_manual_cmd_tweet_pic_video_mode_passes_media_filter_and_force_media(
+    monkeypatch,
+):
+    """Verify /推图 user 5 视频 passes media_filter='video' and force_media=True."""
+    mock_nitter = MagicMock()
+    mock_fx = MagicMock()
+    mock_fx.base_url = "https://api.fxtwitter.com"
+    mock_fx.fetch_user_timeline = MagicMock(
+        return_value=([_make_tweet("nasa", "1001")], None)
+    )
+
+    host = DummyManualHost({"fetch_backend": "mix"}, mock_nitter, mock_fx)
+    event = MagicMock()
+    event.send = AsyncMock()
+    event.stop_event = MagicMock()
+    event.plain_result.side_effect = lambda v: v
+
+    captured_kwargs = {}
+
+    async def fake_send_tweets(evt, usr, inst, tws, **kwargs):
+        captured_kwargs.update(kwargs)
+        return len(tws)
+
+    host._send_tweets_response = fake_send_tweets
+
+    await host._cmd_tweets_impl(
+        event, "nasa", "5", media_type_arg="视频", is_media_only=True
+    )
+
+    mock_fx.fetch_user_timeline.assert_called_once_with(
+        "nasa",
+        count=5,
+        skip_plain_text=True,
+        filter_reposts=True,
+        max_pages=3,
+        media_filter="video",
+    )
+    assert captured_kwargs.get("force_media") is True

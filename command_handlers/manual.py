@@ -161,6 +161,7 @@ class ManualCommandMixin:
         username: str = "",
         limit: str = "",
         *,
+        media_type_arg: str = "",
         is_media_only: bool = False,
     ):
         """获取指定公开 X/Twitter 用户的最近推文或相册媒体推文。"""
@@ -169,9 +170,12 @@ class ManualCommandMixin:
         username = normalize_username(username)
         if not username:
             cmd = "/推图" if is_media_only else "/推文"
-            await event.send(
-                event.plain_result(f"用法：{cmd} 用户名 [数量]\n例如：{cmd} nasa 5")
+            hint = (
+                f"用法：{cmd} 用户名 [数量] [视频/图片]"
+                if is_media_only
+                else f"用法：{cmd} 用户名 [数量]"
             )
+            await event.send(event.plain_result(f"{hint}\n例如：{cmd} nasa 5"))
             return
 
         cooldown_left = self._cooldown_left(event)
@@ -181,9 +185,30 @@ class ManualCommandMixin:
             )
             return
 
-        limit_text = self._strip_self_at_argument(event, limit)
-        if limit_text:
-            parsed_limit, limit_error = self._parse_command_limit(limit_text)
+        # 解析数量与媒体类型参数（支持 /推图 用户名 5 视频 或 /推图 用户名 视频）
+        raw_limit = self._strip_self_at_argument(event, limit)
+        raw_type = self._strip_self_at_argument(event, media_type_arg)
+        media_filter = ""
+
+        def _parse_filter_tag(val: str) -> str:
+            v = str(val or "").strip().lower()
+            if v in ("视频", "video", "v", "videos", "gif"):
+                return "video"
+            if v in ("图片", "图", "image", "photo", "img", "images", "photos"):
+                return "image"
+            return ""
+
+        if is_media_only:
+            # 检查 raw_limit 是否其实是媒体类型（如 /推图 user 视频）
+            detected_type = _parse_filter_tag(raw_limit)
+            if detected_type:
+                media_filter = detected_type
+                raw_limit = ""
+            elif raw_type:
+                media_filter = _parse_filter_tag(raw_type)
+
+        if raw_limit:
+            parsed_limit, limit_error = self._parse_command_limit(raw_limit)
             if limit_error:
                 await event.send(event.plain_result(limit_error))
                 return
@@ -192,7 +217,15 @@ class ManualCommandMixin:
             requested_limit = self.default_limit
         limit = requested_limit
         self._mark_cooldown(event)
-        desc = "相册媒体推文" if is_media_only else "推文"
+
+        is_video_mode = is_media_only and media_filter == "video"
+        if is_video_mode:
+            desc = "视频推文"
+        elif is_media_only:
+            desc = "相册图片推文" if media_filter == "image" else "相册媒体推文"
+        else:
+            desc = "推文"
+
         await event.send(
             event.plain_result(f"正在获取 @{username} 最近最多 {limit} 条{desc}...")
         )
@@ -223,13 +256,18 @@ class ManualCommandMixin:
 
         if backend in ("mix", "fx") and fx is not None:
             try:
+                fetch_kw = {
+                    "count": int(limit),
+                    "skip_plain_text": is_media_only,
+                    "filter_reposts": effective_filter_reposts,
+                    "max_pages": effective_max_pages,
+                }
+                if media_filter:
+                    fetch_kw["media_filter"] = media_filter
                 fx_tweets, _ = await asyncio.to_thread(
                     fx.fetch_user_timeline,
                     username,
-                    count=int(limit),
-                    skip_plain_text=is_media_only,
-                    filter_reposts=effective_filter_reposts,
-                    max_pages=effective_max_pages,
+                    **fetch_kw,
                 )
                 instance = "FxTwitter"
                 tweets = fx_tweets
@@ -278,26 +316,30 @@ class ManualCommandMixin:
                     instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
                     if is_media_only and tweets:
                         tweets = [t for t in tweets if bool(t.media)]
-                except Exception as exc:
-                    logger.warning(
-                        f"[NitterTweets] 手动获取 @{sanitize_sensitive_text(username)} 推文失败: {sanitize_sensitive_text(str(exc))}"
+                if is_video_mode and tweets:
+                    tweets = [t for t in tweets if any(m.is_video for m in t.media)]
+                elif media_filter == "image" and tweets:
+                    tweets = [t for t in tweets if any(m.is_image for m in t.media)]
+            except Exception as exc:
+                logger.warning(
+                    f"[NitterTweets] 手动获取 @{sanitize_sensitive_text(username)} 推文失败: {sanitize_sensitive_text(str(exc))}"
+                )
+                self._log_manual_no_send_task(
+                    "推文查询失败",
+                    operation=op_name,
+                    source=f"@{username}",
+                    instance=instance or "Nitter",
+                    started=started,
+                    status="抓取失败",
+                    error_detail=sanitize_sensitive_text(str(exc)),
+                    warning=True,
+                )
+                await event.send(
+                    event.plain_result(
+                        f"获取 @{username} 推文失败，请检查自建 Nitter 实例。"
                     )
-                    self._log_manual_no_send_task(
-                        "推文查询失败",
-                        operation=op_name,
-                        source=f"@{username}",
-                        instance=instance or "Nitter",
-                        started=started,
-                        status="抓取失败",
-                        error_detail=sanitize_sensitive_text(str(exc)),
-                        warning=True,
-                    )
-                    await event.send(
-                        event.plain_result(
-                            f"获取 @{username} 推文失败，请检查自建 Nitter 实例。"
-                        )
-                    )
-                    return
+                )
+                return
             finally:
                 if hasattr(self.nitter, "end_run_host_skip"):
                     self.nitter.end_run_host_skip()
@@ -312,14 +354,24 @@ class ManualCommandMixin:
                 status="无公开推文",
             )
             empty_msg = (
-                f"没有找到 @{username} 的相册媒体推文。"
+                f"没有找到 @{username} 的{desc}。"
                 if is_media_only
                 else f"没有找到 @{username} 的公开推文。"
             )
             await event.send(event.plain_result(empty_msg))
             return
 
-        sent_count = await self._send_tweets_response(event, username, instance, tweets)
+        kwargs = {}
+        if is_video_mode:
+            kwargs["force_media"] = True
+        try:
+            sent_count = await self._send_tweets_response(
+                event, username, instance, tweets, **kwargs
+            )
+        except TypeError:
+            sent_count = await self._send_tweets_response(
+                event, username, instance, tweets
+            )
         self._log_manual_send_task(
             "推文查询完成",
             operation=op_name,
@@ -873,6 +925,7 @@ class ManualCommandMixin:
         instance: str,
         tweets,
         on_sent_progress=None,
+        force_media: bool = False,
     ) -> int:
         hide_original = resolve_hide_original_when_translated(self.config)
         if self.sender.should_merge_for_event(event, len(tweets)):
@@ -903,6 +956,7 @@ class ManualCommandMixin:
                             username=username,
                             progress_index=tweet_index,
                             progress_total=len(tweets),
+                            force_all_media=force_media,
                         )
                     )
                 sent = await self._send_manual_tweets_with_fallback(
@@ -913,6 +967,7 @@ class ManualCommandMixin:
                     notices=self._dedupe_texts(notices),
                     hide_original_when_translated=hide_original,
                     on_sent_progress=record_sent,
+                    force_media=force_media,
                 )
                 # Preserve compatibility with older overrides that returned
                 # None/True without invoking the new progress callback.
@@ -937,6 +992,7 @@ class ManualCommandMixin:
                     username=username,
                     progress_index=index,
                     progress_total=total,
+                    force_all_media=force_media,
                 )
                 notices = [notice for notice in notices if notice not in sent_notices]
                 sent_notices.update(notices)
@@ -948,6 +1004,7 @@ class ManualCommandMixin:
                     notices=notices,
                     tweet_start_index=1,
                     hide_original_when_translated=hide_original,
+                    force_media=force_media,
                 )
                 # Keep compatibility with pre-reservation overrides that
                 # returned None after a successful send.
@@ -980,9 +1037,12 @@ class ManualCommandMixin:
         username: str = "",
         progress_index: int = 0,
         progress_total: int = 0,
+        force_all_media: bool = False,
     ) -> list[str]:
         translation_report = await self.translator.attach_translations(tweets, umo)
-        await self.media.attach_media(tweets)
+        await self.media.attach_media_with_results(
+            tweets, force_all_media=force_all_media
+        )
         if username:
             self._log_ai_process_results(
                 username,
@@ -1030,6 +1090,7 @@ class ManualCommandMixin:
         tweet_start_index: int = 1,
         hide_original_when_translated: bool = False,
         on_sent_progress=None,
+        force_media: bool = False,
     ) -> bool:
         notices = notices or []
         sent_count = 0
@@ -1056,6 +1117,7 @@ class ManualCommandMixin:
             tweet_start_index=tweet_start_index,
             hide_original_when_translated=hide_original_when_translated,
             on_sent_progress=record_sent,
+            force_media=force_media,
         ):
             record_sent(len(tweets))
             return True

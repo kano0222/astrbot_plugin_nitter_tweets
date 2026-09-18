@@ -354,6 +354,49 @@ class TestFxTwitterClientRoutesAndGuards:
         assert len(tweets) == 2
         assert next_cursor == "cursor_p3"
 
+    def test_user_timeline_media_filter_video_and_image(self, monkeypatch):
+        """media_filter='video' only keeps video tweets; media_filter='image' only keeps image tweets."""
+        client = FxTwitterClient()
+        data = {
+            "code": 200,
+            "results": [
+                {
+                    "type": "status",
+                    "id": "1",
+                    "text": "Photo tweet",
+                    "url": "https://x.com/u/status/1",
+                    "media": {
+                        "all": [{"type": "photo", "url": "https://pbs.twimg.com/1.jpg"}]
+                    },
+                },
+                {
+                    "type": "status",
+                    "id": "2",
+                    "text": "Video tweet",
+                    "url": "https://x.com/u/status/2",
+                    "media": {
+                        "all": [
+                            {"type": "video", "url": "https://video.twimg.com/2.mp4"}
+                        ]
+                    },
+                },
+            ],
+            "cursor": {"bottom": "cur_same"},
+        }
+        monkeypatch.setattr(client, "_fetch_json", lambda url, **kw: data)
+
+        videos, _ = client.fetch_user_timeline(
+            "u", count=5, cursor="cur_same", media_filter="video"
+        )
+        assert len(videos) == 1
+        assert videos[0].status_id == "2"
+
+        images, _ = client.fetch_user_timeline(
+            "u", count=5, cursor="cur_same", media_filter="image"
+        )
+        assert len(images) == 1
+        assert images[0].status_id == "1"
+
     def test_user_timeline_stalled_cursor_returns_none_next_cursor(self, monkeypatch):
         client = FxTwitterClient()
         data = {

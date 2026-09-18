@@ -121,6 +121,7 @@ class SenderForwardMixin:
             hide_original_when_translated=hide_original_when_translated,
             link_style=link_style,
         )
+        last_exc: Exception | None = None
         try:
             await event.send(event.chain_result([nodes]))
             self._notify_delivered(on_delivered, len(tweets))
@@ -132,31 +133,52 @@ class SenderForwardMixin:
                 )
                 self._notify_delivered(on_delivered, len(tweets))
                 return True
-            logger.warning(f"[NitterTweets] 发送合并转发节点失败: {exc}")
-
-        # OneBot raw forward (PATH encoding, before transport gradient).
-        last_exc: Exception | None = None
-        try:
-            if await self._send_onebot_forward(event, raw_nodes):
-                self._notify_delivered(on_delivered, len(tweets))
-                return True
-            logger.warning(
-                f"[NitterTweets] 发送 OneBot 合并转发消息失败: action returned false "
-                f"(tweets={len(tweets)}, target={self._event_target(event)})"
-            )
-        except Exception as exc:
-            last_exc = exc
-            if self._is_uncertain_delivery_error(exc):
-                self._log_uncertain_delivery(
-                    "manual OneBot forward fallback", self._event_target(event), exc
-                )
-                self._notify_delivered(on_delivered, len(tweets))
-                return True
             if self._is_content_rejected_error(
                 exc
             ) or self._is_forward_payload_rejected_error(exc):
                 self.last_send_rejected = True
-            logger.warning(f"[NitterTweets] 发送 OneBot 合并转发消息失败: {exc}")
+                last_exc = exc
+                target = sanitize_sensitive_text(self._event_target(event))
+                logger.warning(
+                    f"[NitterTweets] 发送合并转发节点被平台拒收 (tweets={len(tweets)}, target={target})"
+                )
+                logger.debug(f"[NitterTweets] 发送合并转发节点拒收详情: {exc}")
+            else:
+                logger.warning(f"[NitterTweets] 发送合并转发节点失败: {exc}")
+
+        # OneBot raw forward (PATH encoding, before transport gradient).
+        if last_exc is None:
+            try:
+                if await self._send_onebot_forward(event, raw_nodes):
+                    self._notify_delivered(on_delivered, len(tweets))
+                    return True
+                logger.warning(
+                    f"[NitterTweets] 发送 OneBot 合并转发消息失败: action returned false "
+                    f"(tweets={len(tweets)}, target={sanitize_sensitive_text(self._event_target(event))})"
+                )
+            except Exception as exc:
+                last_exc = exc
+                if self._is_uncertain_delivery_error(exc):
+                    self._log_uncertain_delivery(
+                        "manual OneBot forward fallback", self._event_target(event), exc
+                    )
+                    self._notify_delivered(on_delivered, len(tweets))
+                    return True
+                if self._is_content_rejected_error(
+                    exc
+                ) or self._is_forward_payload_rejected_error(exc):
+                    self.last_send_rejected = True
+                    target = sanitize_sensitive_text(self._event_target(event))
+                    logger.warning(
+                        f"[NitterTweets] 发送 OneBot 合并转发消息被平台拒收 (tweets={len(tweets)}, target={target})"
+                    )
+                    logger.debug(
+                        f"[NitterTweets] 发送 OneBot 合并转发消息拒收详情: {exc}"
+                    )
+                else:
+                    logger.warning(
+                        f"[NitterTweets] 发送 OneBot 合并转发消息失败: {exc}"
+                    )
 
         # retcode 1200 / res_id fail / explicit false: split smaller merges then retry.
         # false return (no exception) is treated as payload reject so we can split.
@@ -239,7 +261,17 @@ class SenderForwardMixin:
                     exc
                 ) or self._is_forward_payload_rejected_error(exc):
                     self.last_send_rejected = True
-                logger.warning(f"[NitterTweets] 发送去除视频的合并转发节点失败: {exc}")
+                    target = sanitize_sensitive_text(self._event_target(event))
+                    logger.warning(
+                        f"[NitterTweets] 发送去除视频的合并转发消息被平台拒收 (tweets={len(tweets)}, target={target})"
+                    )
+                    logger.debug(
+                        f"[NitterTweets] 发送去除视频的合并转发消息拒收详情: {exc}"
+                    )
+                else:
+                    logger.warning(
+                        f"[NitterTweets] 发送去除视频的合并转发消息失败: {exc}"
+                    )
             try:
                 nodes_nv = self.renderer.build_nodes(
                     event,
@@ -269,7 +301,17 @@ class SenderForwardMixin:
                     exc
                 ) or self._is_forward_payload_rejected_error(exc):
                     self.last_send_rejected = True
-                logger.warning(f"[NitterTweets] 发送去除视频的合并转发节点失败: {exc}")
+                    target = sanitize_sensitive_text(self._event_target(event))
+                    logger.warning(
+                        f"[NitterTweets] 发送去除视频的合并转发节点被平台拒收 (tweets={len(tweets)}, target={target})"
+                    )
+                    logger.debug(
+                        f"[NitterTweets] 发送去除视频的合并转发节点拒收详情: {exc}"
+                    )
+                else:
+                    logger.warning(
+                        f"[NitterTweets] 发送去除视频的合并转发节点失败: {exc}"
+                    )
 
         remaining = tweets
         remaining_index = tweet_start_index

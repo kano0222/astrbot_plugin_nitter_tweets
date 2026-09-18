@@ -60,7 +60,7 @@ except ImportError:
     "astrbot_plugin_nitter_tweets",
     "shitianyaa",
     "Fetch recent public tweets from Nitter and send them as chat records.",
-    "1.6.1",
+    "1.6.2",
     "https://github.com/shitianyaa/astrbot_plugin_nitter_tweets",
 )
 class NitterTweetsPlugin(
@@ -220,8 +220,13 @@ class NitterTweetsPlugin(
         event: AstrMessageEvent,
         username: str = "",
         limit: str = "",
+        media_type: str = "",
     ):
-        """查询指定公开 X/Twitter 用户最近相册媒体推文。用法：/推图 用户名 [数量]"""
+        """查询指定公开 X/Twitter 用户最近相册媒体推文。用法：/推图 用户名 [数量] [视频/图片]"""
+        if media_type:
+            return await self._cmd_tweets_impl(
+                event, username, limit, media_type_arg=media_type, is_media_only=True
+            )
         return await self._cmd_tweets_impl(event, username, limit, is_media_only=True)
 
     @filter.command("推文搜索", alias={"tweetsearch"})

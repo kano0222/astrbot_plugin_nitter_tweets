@@ -99,7 +99,7 @@ async def test_event_forward_remainder_only_direct_after_partial_split(monkeypat
 
     event = MagicMock()
     event.chain_result = MagicMock(side_effect=lambda x: x)
-    event.send = AsyncMock(side_effect=_FakeActionFailed(1200))
+    event.send = AsyncMock(side_effect=RuntimeError("event.send failed"))
 
     # full(4) fail → left(2) ok → right(2) fail → direct remainder only
     results = iter([False, True, False])
@@ -139,7 +139,7 @@ async def test_event_forward_recursive_split_all_ok(monkeypatch):
 
     event = MagicMock()
     event.chain_result = MagicMock(side_effect=lambda x: x)
-    event.send = AsyncMock(side_effect=_FakeActionFailed(1200))
+    event.send = AsyncMock(side_effect=RuntimeError("event.send failed"))
 
     calls = {"onebot": 0}
 
@@ -767,7 +767,7 @@ async def test_manual_forward_reject_continues_other_split_parts(monkeypatch):
 
     event = MagicMock()
     event.chain_result = MagicMock(side_effect=lambda x: x)
-    event.send = AsyncMock(side_effect=_FakeActionFailed(1200))
+    event.send = AsyncMock(side_effect=RuntimeError("event.send failed"))
 
     calls = 0
 
@@ -948,3 +948,64 @@ async def test_manual_rejection_with_fallback_enabled_sends_plain():
     host.sender.renderer.format_plain.assert_called_once()
     sent_arg = event.send.call_args[0][0]
     assert hasattr(sent_arg, "chain") or "plain text" in str(sent_arg)
+
+
+@pytest.mark.asyncio
+async def test_event_forward_reject_1200_skips_onebot_raw_forward_and_logs_clean(
+    monkeypatch, caplog
+):
+    """When event.send encounters retcode 1200 reject, skip OneBot raw forward repeated call and log clean warning."""
+    import logging
+
+    sender = _event_sender(monkeypatch)
+    sender.forward_reject_plain_fallback_enabled = False
+
+    event = MagicMock()
+    event.chain_result = MagicMock(side_effect=lambda x: x)
+    raw_res_id_msg = "发送转发消息（res_id：0123456789abcdef0123456789abcdef 失败"
+    event.send = AsyncMock(side_effect=_FakeActionFailed(1200, raw_res_id_msg))
+    sender._send_onebot_forward = AsyncMock(return_value=True)
+
+    adapter = MagicMock()
+    adapter.send_event = AsyncMock(return_value=True)
+    sender._delivery_adapter_for_event = MagicMock(return_value=adapter)
+
+    with caplog.at_level(logging.WARNING):
+        ok = await sender._send_event_forward_chunk(
+            event, "u", "https://nitter.example", _tweets(1)
+        )
+
+    assert ok is False
+    assert sender.last_send_rejected is True
+    sender._send_onebot_forward.assert_not_called()
+    adapter.send_event.assert_not_called()
+
+    warning_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "NitterTweets" in r.message
+    ]
+    assert any("发送合并转发节点被平台拒收" in r.message for r in warning_records)
+    # Ensure long res_id hash was not dumped in warning log
+    assert all(
+        "0123456789abcdef0123456789abcdef" not in r.message for r in warning_records
+    )
+
+
+@pytest.mark.asyncio
+async def test_event_forward_non_1200_error_calls_onebot_raw_forward(monkeypatch):
+    """When event.send fails with an ordinary error, OneBot raw forward rescue is still called."""
+    sender = _event_sender(monkeypatch)
+
+    event = MagicMock()
+    event.chain_result = MagicMock(side_effect=lambda x: x)
+    event.send = AsyncMock(side_effect=RuntimeError("temporary network error"))
+    sender._send_onebot_forward = AsyncMock(return_value=True)
+
+    ok = await sender._send_event_forward_chunk(
+        event, "u", "https://nitter.example", _tweets(1)
+    )
+
+    assert ok is True
+    assert sender.last_send_rejected is False
+    sender._send_onebot_forward.assert_awaited_once()
