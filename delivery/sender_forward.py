@@ -142,7 +142,9 @@ class SenderForwardMixin:
                 logger.warning(
                     f"[NitterTweets] 发送合并转发节点被平台拒收 (tweets={len(tweets)}, target={target})"
                 )
-                logger.debug(f"[NitterTweets] 发送合并转发节点拒收详情: {exc}")
+                logger.debug(
+                    f"[NitterTweets] 发送合并转发节点拒收详情: {sanitize_sensitive_text(str(exc))}"
+                )
             else:
                 logger.warning(f"[NitterTweets] 发送合并转发节点失败: {exc}")
 
@@ -173,7 +175,7 @@ class SenderForwardMixin:
                         f"[NitterTweets] 发送 OneBot 合并转发消息被平台拒收 (tweets={len(tweets)}, target={target})"
                     )
                     logger.debug(
-                        f"[NitterTweets] 发送 OneBot 合并转发消息拒收详情: {exc}"
+                        f"[NitterTweets] 发送 OneBot 合并转发消息拒收详情: {sanitize_sensitive_text(str(exc))}"
                     )
                 else:
                     logger.warning(
@@ -266,7 +268,7 @@ class SenderForwardMixin:
                         f"[NitterTweets] 发送去除视频的合并转发消息被平台拒收 (tweets={len(tweets)}, target={target})"
                     )
                     logger.debug(
-                        f"[NitterTweets] 发送去除视频的合并转发消息拒收详情: {exc}"
+                        f"[NitterTweets] 发送去除视频的合并转发消息拒收详情: {sanitize_sensitive_text(str(exc))}"
                     )
                 else:
                     logger.warning(
@@ -306,7 +308,7 @@ class SenderForwardMixin:
                         f"[NitterTweets] 发送去除视频的合并转发节点被平台拒收 (tweets={len(tweets)}, target={target})"
                     )
                     logger.debug(
-                        f"[NitterTweets] 发送去除视频的合并转发节点拒收详情: {exc}"
+                        f"[NitterTweets] 发送去除视频的合并转发节点拒收详情: {sanitize_sensitive_text(str(exc))}"
                     )
                 else:
                     logger.warning(

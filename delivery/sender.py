@@ -479,7 +479,7 @@ class TweetSender(
                 f"label={label}, target={clean_target}, reason={clean_reason}"
             )
             logger.debug(
-                f"[NitterTweets] 发送被目标平台拒收详情: label={label}, target={clean_target}, error={exc}"
+                f"[NitterTweets] 发送被目标平台拒收详情: label={label}, target={clean_target}, error={sanitize_sensitive_text(str(exc))}"
             )
             # 只表达「同样的字节别再发一遍」。retryable 保持 True，让既有的
             # 有损降级链（去视频、拆分、降级直发、纯文本）照常运行——那些都是

@@ -489,7 +489,7 @@ class MediaService(MediaCacheMixin):
         except Exception as exc:
             logger.info(
                 f"[NitterTweets] 内部 status_resolve 获取媒体候选失败，回退 xdown: "
-                f"tweet={getattr(tweet, 'x_url', '')}, error={type(exc).__name__}: {_safe_text(exc)}"
+                f"tweet={_safe_url(getattr(tweet, 'x_url', ''))}, error={type(exc).__name__}: {_safe_text(exc)}"
             )
         return []
 
@@ -598,7 +598,7 @@ class MediaService(MediaCacheMixin):
             if skipped_images:
                 logger.info(
                     "[NitterTweets] 检测到视频/GIF，跳过同条推文中的图片候选: "
-                    f"skipped={skipped_images}, tweet={getattr(tweet, 'x_url', '')}"
+                    f"skipped={skipped_images}, tweet={_safe_url(getattr(tweet, 'x_url', ''))}"
                 )
             return [
                 TweetMedia(
@@ -737,7 +737,7 @@ class MediaService(MediaCacheMixin):
             logger.info(
                 "[NitterTweets] 跳过超长视频候选: "
                 f"longest={self._format_duration(longest)}, "
-                f"limit={self._format_duration(max_seconds)}, tweet={getattr(tweet, 'x_url', '')}"
+                f"limit={self._format_duration(max_seconds)}, tweet={_safe_url(getattr(tweet, 'x_url', ''))}"
             )
         return allowed
 
