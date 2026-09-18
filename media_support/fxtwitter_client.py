@@ -16,10 +16,15 @@ try:
         format_tweet_published,
     )
     from .network import build_request_headers, safe_urlopen
-    from .status_resolve import _extract_status_text, _media_from_fxtwitter
+    from .status_resolve import (
+        _candidates_from_fxtwitter,
+        _extract_status_text,
+        _media_from_fxtwitter,
+    )
 except ImportError:
     from media_support.network import build_request_headers, safe_urlopen
     from media_support.status_resolve import (
+        _candidates_from_fxtwitter,
         _extract_status_text,
         _media_from_fxtwitter,
     )
@@ -152,7 +157,8 @@ class FxTwitterClient:
 
         text = _extract_status_text(tw)
         media = _media_from_fxtwitter(tw)
-        if not text and not media:
+        candidates = _candidates_from_fxtwitter(tw)
+        if not text and not media and not candidates:
             return None
 
         status_url = str(tw.get("url") or "").strip()
@@ -187,6 +193,7 @@ class FxTwitterClient:
             published=published,
             media=media,
             is_retweet=is_retweet,
+            media_candidates=candidates,
         )
 
     def fetch_user_timeline(

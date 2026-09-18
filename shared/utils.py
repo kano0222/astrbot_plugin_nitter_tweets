@@ -7,8 +7,12 @@ import re
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+if TYPE_CHECKING:
+    from media_support.xdown import XdownMediaCandidate
 
 try:
     CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -55,6 +59,7 @@ class TweetItem:
     ai_warnings: list[str] = field(default_factory=list)
     translation: str = ""
     is_retweet: bool = False
+    media_candidates: list[XdownMediaCandidate] = field(default_factory=list)
 
     @property
     def status_id(self) -> str:
