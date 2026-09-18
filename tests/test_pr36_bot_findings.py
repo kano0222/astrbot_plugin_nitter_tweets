@@ -480,13 +480,24 @@ def test_p1_build_video_forwards_omit_status_url_false():
         hide_original_when_translated=False,
         link_style="plain",
     )
+    # Video node components are pure video without duplicate text
+    assert len(components) == 1
     plain_parts = [
         getattr(c, "text", None) or str(c)
         for c in components
         if getattr(c, "text", None) or "Plain" in type(c).__name__
     ]
-    blob = "\n".join(str(p) for p in plain_parts if p)
-    # When omit is False, status/original link should appear in attachment caption
+    assert not plain_parts
+
+    # format_video_attachment_text preserves attachment caption formatting with omit_status_url=False
+    blob = renderer.format_video_attachment_text(
+        1,
+        "nasa",
+        tweet,
+        omit_status_url=False,
+        hide_original_when_translated=False,
+        link_style="plain",
+    )
     assert "1234567890" in blob or "x.com/nasa" in blob or "原文" in blob, blob
 
 

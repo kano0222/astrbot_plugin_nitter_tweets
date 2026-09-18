@@ -362,9 +362,10 @@ def test_forward_video_keeps_own_node_with_author_identity():
     assert len(nodes.nodes) == 2
     tweet_node, video_node = nodes.nodes
     assert [_kind(c) for c in tweet_node.content] == ["plain", "image"]
+    assert [_kind(c) for c in video_node.content] == ["video"]
     video_text = "".join(getattr(c, "text", "") for c in video_node.content)
-    assert "视频/GIF 附件" in video_text
-    assert _kind(video_node.content[-1]) == "video"
+    assert not video_text
+    assert "视频/GIF 附件" not in video_text
     assert (video_node.uin, video_node.name) == ("@nasa", "@nasa")
 
 

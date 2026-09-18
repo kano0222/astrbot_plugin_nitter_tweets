@@ -100,9 +100,14 @@ class TweetSender(
             False,
         )
         self.last_send_rejected = False
+        self.send_batch_summary_enabled = parse_config_bool(
+            config_get(config, "send_batch_summary_enabled", True),
+            True,
+        )
         self.renderer = TweetMessageRenderer(
             send_image_attachments=self.send_image_attachments,
             send_video_attachments=self.send_video_attachments,
+            send_batch_summary_enabled=self.send_batch_summary_enabled,
         )
         self.platform_resolver = PlatformResolver()
         self.delivery_registry = PlatformDeliveryRegistry()
@@ -129,6 +134,7 @@ class TweetSender(
         sender.renderer = TweetMessageRenderer(
             send_image_attachments=True,
             send_video_attachments=True,
+            send_batch_summary_enabled=self.send_batch_summary_enabled,
         )
         return sender
 

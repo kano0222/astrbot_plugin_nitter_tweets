@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from functools import wraps
 from urllib.parse import urlparse
 
 try:
@@ -42,14 +43,38 @@ _QQ_OFFICIAL_URL_TRAILING_PUNCTUATION = frozenset(".,;:!?)]}。、！）；：�
 _ZERO_WIDTH_SPACE = "\u200b"
 
 
+class _hybrid_summary_method:
+    """Descriptor allowing a method to be called either on an instance (using
+    instance.send_batch_summary_enabled) or on the class (defaulting to True
+    unless send_batch_summary_enabled kwarg is explicitly provided)."""
+
+    def __init__(self, func):
+        self.func = func
+        self.__name__ = func.__name__
+        self.__doc__ = func.__doc__
+
+    def __get__(self, instance, owner=None):
+        target = instance if instance is not None else owner
+
+        @wraps(self.func)
+        def wrapper(*args, **kwargs):
+            return self.func(target, *args, **kwargs)
+
+        return wrapper
+
+
 class TweetMessageRenderer:
+    send_batch_summary_enabled: bool = True
+
     def __init__(
         self,
         send_image_attachments: bool = True,
         send_video_attachments: bool = False,
+        send_batch_summary_enabled: bool = True,
     ):
         self.send_image_attachments = send_image_attachments
         self.send_video_attachments = send_video_attachments
+        self.send_batch_summary_enabled = send_batch_summary_enabled
 
     @staticmethod
     def _source_node_name(username: str) -> str:
@@ -669,23 +694,7 @@ class TweetMessageRenderer:
         hide_original_when_translated: bool = False,
         link_style: str = "plain",
     ):
-        if media_only:
-            return [Video.fromFileSystem(str(media.path))]
-        return [
-            Plain(
-                self.format_video_attachment_text(
-                    index,
-                    username,
-                    tweet,
-                    source,
-                    media_only=media_only,
-                    omit_status_url=omit_status_url,
-                    hide_original_when_translated=hide_original_when_translated,
-                    link_style=link_style,
-                )
-            ),
-            Video.fromFileSystem(str(media.path)),
-        ]
+        return [Video.fromFileSystem(str(media.path))]
 
     def build_onebot_nodes(
         self,
@@ -815,23 +824,7 @@ class TweetMessageRenderer:
         link_style: str = "plain",
         segment_builder=None,
     ) -> list[dict]:
-        if media_only:
-            return [self.raw_media(media, segment_builder)]
-        return [
-            self.raw_text(
-                self.format_video_attachment_text(
-                    index,
-                    username,
-                    tweet,
-                    source,
-                    media_only=media_only,
-                    omit_status_url=omit_status_url,
-                    hide_original_when_translated=hide_original_when_translated,
-                    link_style=link_style,
-                )
-            ),
-            self.raw_media(media, segment_builder),
-        ]
+        return [self.raw_media(media, segment_builder)]
 
     def _build_onebot_tweet_content(
         self,
@@ -960,7 +953,10 @@ class TweetMessageRenderer:
         hide_original_when_translated: bool = False,
         link_style: str = "plain",
     ) -> str:
-        blocks = [self.format_merged_header(batches, group_label, batch_summary)]
+        blocks = []
+        header = self.format_merged_header(batches, group_label, batch_summary)
+        if header:
+            blocks.append(header)
         index = start_index
         for username, instance, tweets in batches:
             for tweet in tweets:
@@ -978,14 +974,23 @@ class TweetMessageRenderer:
                     )
                 )
                 index += 1
-        return "\n\n".join(blocks)
+        return "\n\n".join(block for block in blocks if block)
 
-    @staticmethod
+    @_hybrid_summary_method
     def format_merged_header(
+        target,
         batches: list[TweetBatch],
         group_label: str = "",
         batch_summary: str = "",
+        *,
+        send_batch_summary_enabled: bool | None = None,
     ) -> str:
+        if send_batch_summary_enabled is None:
+            send_batch_summary_enabled = getattr(
+                target, "send_batch_summary_enabled", True
+            )
+        if not send_batch_summary_enabled:
+            return ""
         if batch_summary.strip():
             return batch_summary.strip()
         group_type = "blogger"
@@ -1014,16 +1019,28 @@ class TweetMessageRenderer:
             return f"📬 {group_label} · {subscription_count} · {total} 条新推文"
         return f"📬 {subscription_count} · {total} 条新推文"
 
-    @staticmethod
+    @_hybrid_summary_method
     def format_tweet_with_source(
+        target,
         index: int,
         username: str,
         tweet: TweetItem,
         source: str = "",
+        *,
+        send_batch_summary_enabled: bool | None = None,
         **kwargs,
     ) -> str:
+        if send_batch_summary_enabled is None:
+            send_batch_summary_enabled = getattr(
+                target, "send_batch_summary_enabled", True
+            )
         return TweetMessageRenderer.format_tweet(
-            index, username, tweet, source=source, **kwargs
+            index,
+            username,
+            tweet,
+            source=source,
+            send_batch_summary_enabled=send_batch_summary_enabled,
+            **kwargs,
         )
 
     @staticmethod
@@ -1069,8 +1086,9 @@ class TweetMessageRenderer:
         cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
         return cleaned.strip()
 
-    @staticmethod
+    @_hybrid_summary_method
     def format_tweet(
+        target,
         index: int,
         username: str,
         tweet: TweetItem,
@@ -1079,7 +1097,12 @@ class TweetMessageRenderer:
         omit_status_url: bool = True,
         hide_original_when_translated: bool = False,
         link_style: str = "plain",
+        send_batch_summary_enabled: bool | None = None,
     ) -> str:
+        if send_batch_summary_enabled is None:
+            send_batch_summary_enabled = getattr(
+                target, "send_batch_summary_enabled", True
+            )
         status_url = (tweet.x_url or tweet.link or "").strip()
         author = TweetMessageRenderer.display_username(username, tweet)
         author_label = f"@{author}" if author else "@unknown"
@@ -1205,9 +1228,10 @@ class TweetMessageRenderer:
                 warns = "\n".join(f"- {w}" for w in processed_warns)
                 blocks.append("⚠️\n" + warns)
 
-        media_summary = TweetMessageRenderer.format_media_summary(tweet)
-        if media_summary:
-            blocks.append(media_summary)
+        if send_batch_summary_enabled:
+            media_summary = TweetMessageRenderer.format_media_summary(tweet)
+            if media_summary:
+                blocks.append(media_summary)
 
         return "\n\n".join(blocks)
 
@@ -1361,8 +1385,9 @@ class TweetMessageRenderer:
         )
         return f"@{safe_author_name} · {status_link}"
 
-    @staticmethod
+    @_hybrid_summary_method
     def format_video_attachment_text(
+        target,
         index: int,
         username: str,
         tweet: TweetItem,
@@ -1371,7 +1396,13 @@ class TweetMessageRenderer:
         omit_status_url: bool = True,
         hide_original_when_translated: bool = False,
         link_style: str = "plain",
+        *,
+        send_batch_summary_enabled: bool | None = None,
     ) -> str:
+        if send_batch_summary_enabled is None:
+            send_batch_summary_enabled = getattr(
+                target, "send_batch_summary_enabled", True
+            )
         if media_only:
             return TweetMessageRenderer._source_node_name(username)
         text = TweetMessageRenderer.format_tweet(
@@ -1382,14 +1413,15 @@ class TweetMessageRenderer:
             omit_status_url=omit_status_url,
             hide_original_when_translated=hide_original_when_translated,
             link_style=link_style,
+            send_batch_summary_enabled=send_batch_summary_enabled,
         )
         if text:
             return f"{text}\n\n视频/GIF 附件"
         return f"{TweetMessageRenderer._source_node_name(username)}\n视频/GIF 附件"
 
-    @classmethod
+    @_hybrid_summary_method
     def format_header(
-        cls,
+        target,
         username: str,
         instance: str,
         tweet_count: int,
@@ -1401,45 +1433,54 @@ class TweetMessageRenderer:
         omit_status_url: bool = True,
         hide_original_when_translated: bool = False,
         link_style: str = "plain",
+        *,
+        send_batch_summary_enabled: bool | None = None,
     ) -> str:
+        if send_batch_summary_enabled is None:
+            send_batch_summary_enabled = getattr(
+                target, "send_batch_summary_enabled", True
+            )
         raw_summary = str(batch_summary or "").strip()
         raw_header = str(header_text or "").strip()
         raw_group_label = str(group_label or "").strip()
         is_qq_official_markdown = link_style == "qq_official_md"
         summary = (
-            cls.qq_official_markdown_text(raw_summary)
+            TweetMessageRenderer.qq_official_markdown_text(raw_summary)
             if is_qq_official_markdown
             else raw_summary
         )
         safe_header = (
-            cls.qq_official_markdown_text(raw_header)
+            TweetMessageRenderer.qq_official_markdown_text(raw_header)
             if is_qq_official_markdown
             else raw_header
         )
         safe_group_label = (
-            cls.qq_official_markdown_text(raw_group_label)
+            TweetMessageRenderer.qq_official_markdown_text(raw_group_label)
             if is_qq_official_markdown
             else raw_group_label
         )
         lines = []
-        if summary:
-            lines.append(summary)
-        if safe_header:
-            lines.append(safe_header)
-        if (
-            raw_group_label
-            and (raw_summary or raw_header)
-            and f"分组\uff1a{raw_group_label}" not in raw_summary
-        ):
-            lines.append(f"分组\uff1a{safe_group_label}")
+        if send_batch_summary_enabled:
+            if summary:
+                lines.append(summary)
+            if safe_header:
+                lines.append(safe_header)
+            if (
+                raw_group_label
+                and (raw_summary or raw_header)
+                and f"分组：{raw_group_label}" not in raw_summary
+            ):
+                lines.append(f"分组：{safe_group_label}")
         safe_notices = notices
         if is_qq_official_markdown:
             safe_notices = [
-                cls.qq_official_markdown_text(str(notice).strip())
+                TweetMessageRenderer.qq_official_markdown_text(str(notice).strip())
                 for notice in notices or []
                 if str(notice or "").strip()
             ]
-        notice_text = "" if media_only else cls.format_notices(safe_notices)
+        notice_text = (
+            "" if media_only else TweetMessageRenderer.format_notices(safe_notices)
+        )
         if notice_text:
             lines.append(notice_text)
         return "\n".join(lines)
