@@ -1418,7 +1418,7 @@ async function saveConfigDraft() {
   state.configSaving = true; renderConfig();
   try {
     const result = await apiPost("web/config/save", { changes: Object.fromEntries(changed) });
-    for (const [key, value] of changed) {
+    for (const [key, value] of Object.entries(result.values || {})) {
       const item = findConfigItem(key);
       if (item) item.value = value;
       delete state.configDraft[key];

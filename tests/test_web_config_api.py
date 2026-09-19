@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -212,8 +213,15 @@ def test_save_config_does_not_reload_when_validation_fails():
     assert calls == []
 
 
-def test_save_config_reports_saved_when_reload_fails():
+def test_save_config_reports_saved_when_reload_fails(monkeypatch):
     config = _FakeConfig()
+    log_events = []
+    monkeypatch.setattr(
+        "plugin_api.api_config.safe_log",
+        lambda level, event_name, **fields: log_events.append(
+            (level, event_name, fields)
+        ),
+    )
 
     class _Manager:
         async def reload(self, plugin_name):
@@ -235,6 +243,13 @@ def test_save_config_reports_saved_when_reload_fails():
     assert result["saved"] is True
     assert result["reloaded"] is False
     assert config.saved == 1
+    assert log_events == [
+        (
+            logging.WARNING,
+            "config_reload_failed",
+            {"status": "saved", "error": "RuntimeError: reload failed"},
+        )
+    ]
 
 
 def test_update_rejects_bad_number_and_option():

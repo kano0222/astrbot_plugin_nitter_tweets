@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Any
@@ -14,14 +15,17 @@ from typing import Any
 try:
     from astrbot.api import logger
 except ImportError:
-    import logging
-
     logger = logging.getLogger(__name__)
 
 try:
     from ..config.compat import config_get
 except ImportError:
     from config.compat import config_get
+
+try:
+    from ..shared.observability import safe_log
+except ImportError:
+    from shared.observability import safe_log
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[1] / "_conf_schema.json"
 _NON_EDITABLE_ITEM_TYPES = frozenset({"template_list"})
@@ -155,9 +159,11 @@ class WebAPIConfigMixin:
         try:
             await self._reload_current_plugin()
         except Exception as exc:
-            logger.warning(
-                "[NitterTweets] 配置已保存，但插件热重载失败: "
-                f"{type(exc).__name__}: {exc}"
+            safe_log(
+                logging.WARNING,
+                "config_reload_failed",
+                status="saved",
+                error=f"{type(exc).__name__}: {exc}",
             )
             return {
                 **result,
