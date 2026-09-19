@@ -356,8 +356,8 @@ class TweetMessageRenderer:
             {
                 "type": "node",
                 "data": {
-                    "name": item["name"],
-                    "uin": item["uin"],
+                    "user_id": item["uin"],
+                    "nickname": item["name"],
                     "content": item["content"],
                 },
             }
@@ -703,6 +703,7 @@ class TweetMessageRenderer:
         instance: str,
         tweets: list[TweetItem],
         start_index: int = 1,
+        exclude_videos: bool = False,
         notices: list[str] | None = None,
         group_label: str = "",
         header_text: str = "",
@@ -741,6 +742,7 @@ class TweetMessageRenderer:
                 username,
                 instance,
                 tweet,
+                exclude_videos=exclude_videos,
                 include_videos=False,
                 include_images=True,
                 media_only=media_only,
@@ -756,7 +758,7 @@ class TweetMessageRenderer:
                     "content": content,
                 }
             )
-            if self.send_video_attachments:
+            if not exclude_videos and self.send_video_attachments:
                 for media in tweet.media:
                     if media.path and media.is_video:
                         items.append(
@@ -782,8 +784,8 @@ class TweetMessageRenderer:
             {
                 "type": "node",
                 "data": {
-                    "name": item["name"],
-                    "uin": item["uin"],
+                    "user_id": item["uin"],
+                    "nickname": item["name"],
                     "content": item["content"],
                 },
             }

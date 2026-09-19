@@ -427,9 +427,9 @@ def test_merged_onebot_nodes_merge_images_and_use_author_identity():
     nodes = r.build_merged_onebot_nodes_for_uin(10000, [("q:cats", "", [tweet])])
     # Merged builders always lead with a header node.
     assert len(nodes) == 2
-    assert nodes[0]["data"]["name"] == "Nitter"
+    assert nodes[0]["data"]["nickname"] == "Nitter"
     node = nodes[1]["data"]
-    assert (node["uin"], node["name"]) == ("@cat_a", "@cat_a")
+    assert (node["user_id"], node["nickname"]) == ("@cat_a", "@cat_a")
     assert [seg["type"] for seg in node["content"]] == ["text", "image", "image"]
 
 
@@ -440,7 +440,7 @@ def test_onebot_nodes_merge_images_and_use_author_identity():
     nodes = r.build_onebot_nodes(event, "nasa", "", [tweet])
     assert len(nodes) == 1
     node = nodes[0]["data"]
-    assert (node["uin"], node["name"]) == ("@nasa", "@nasa")
+    assert (node["user_id"], node["nickname"]) == ("@nasa", "@nasa")
     assert [seg["type"] for seg in node["content"]] == ["text", "image"]
 
 

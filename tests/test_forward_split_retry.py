@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from delivery.outcomes import SendAttempt, SendOutcome
 from delivery.sender import TweetSender
-from shared.utils import TweetItem
+from rendering.tweets import TweetMessageRenderer
+from shared.utils import TweetItem, TweetMedia
 
 
 class _FakeActionFailed(Exception):
@@ -952,28 +954,43 @@ async def test_manual_rejection_with_fallback_enabled_sends_plain():
 
 @pytest.mark.asyncio
 async def test_event_forward_reject_1200_skips_onebot_raw_forward_and_logs_clean(
-    monkeypatch, caplog
+    monkeypatch,
 ):
     """When event.send encounters retcode 1200 reject, skip OneBot raw forward repeated call and log clean warning."""
     import logging
 
-    sender = _event_sender(monkeypatch)
-    sender.forward_reject_plain_fallback_enabled = False
+    # astrbot logger 挂的是 Loguru 拦截 handler 且 propagate=False，caplog 收不到记录，
+    # 需要直接向该 logger 挂捕获 handler。
+    class _CaptureHandler(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records: list[logging.LogRecord] = []
 
-    event = MagicMock()
-    event.chain_result = MagicMock(side_effect=lambda x: x)
-    raw_res_id_msg = "发送转发消息（res_id：0123456789abcdef0123456789abcdef 失败"
-    event.send = AsyncMock(side_effect=_FakeActionFailed(1200, raw_res_id_msg))
-    sender._send_onebot_forward = AsyncMock(return_value=True)
+        def emit(self, record):
+            self.records.append(record)
 
-    adapter = MagicMock()
-    adapter.send_event = AsyncMock(return_value=True)
-    sender._delivery_adapter_for_event = MagicMock(return_value=adapter)
+    handler = _CaptureHandler()
+    astr_logger = logging.getLogger("astrbot")
+    astr_logger.addHandler(handler)
+    try:
+        sender = _event_sender(monkeypatch)
+        sender.forward_reject_plain_fallback_enabled = False
 
-    with caplog.at_level(logging.WARNING):
+        event = MagicMock()
+        event.chain_result = MagicMock(side_effect=lambda x: x)
+        raw_res_id_msg = "发送转发消息（res_id：0123456789abcdef0123456789abcdef 失败"
+        event.send = AsyncMock(side_effect=_FakeActionFailed(1200, raw_res_id_msg))
+        sender._send_onebot_forward = AsyncMock(return_value=True)
+
+        adapter = MagicMock()
+        adapter.send_event = AsyncMock(return_value=True)
+        sender._delivery_adapter_for_event = MagicMock(return_value=adapter)
+
         ok = await sender._send_event_forward_chunk(
             event, "u", "https://nitter.example", _tweets(1)
         )
+    finally:
+        astr_logger.removeHandler(handler)
 
     assert ok is False
     assert sender.last_send_rejected is True
@@ -982,13 +999,58 @@ async def test_event_forward_reject_1200_skips_onebot_raw_forward_and_logs_clean
 
     warning_records = [
         r
-        for r in caplog.records
-        if r.levelno == logging.WARNING and "NitterTweets" in r.message
+        for r in handler.records
+        if r.levelno == logging.WARNING and "NitterTweets" in r.getMessage()
     ]
-    assert any("发送合并转发节点被平台拒收" in r.message for r in warning_records)
+    assert any("发送合并转发节点被平台拒收" in r.getMessage() for r in warning_records)
     # Ensure long res_id hash was not dumped in warning log
     assert all(
-        "0123456789abcdef0123456789abcdef" not in r.message for r in warning_records
+        "0123456789abcdef0123456789abcdef" not in r.getMessage()
+        for r in warning_records
+    )
+
+
+@pytest.mark.asyncio
+async def test_event_forward_no_video_retry_builds_raw_nodes_without_video_segments(
+    monkeypatch,
+):
+    """Lossy no-video retry after forward failure must build raw nodes, not crash.
+
+    Regression: build_onebot_nodes did not accept ``exclude_videos`` while
+    sender_forward passed it outside any try block, so the whole no-video /
+    split / direct degradation chain died with a TypeError whenever the first
+    two forward attempts failed with retryable errors on tweets with videos.
+    """
+    sender = _event_sender(monkeypatch)
+    # Real renderer: a MagicMock would silently swallow the bad kwarg.
+    sender.renderer = TweetMessageRenderer(send_video_attachments=True)
+    sender.forward_reject_plain_fallback_enabled = False
+
+    tweet = _tweets(1)[0]
+    tweet.media = [
+        TweetMedia("video", "https://example.test/101.mp4", path=Path("101.mp4"))
+    ]
+
+    event = MagicMock()
+    event.chain_result = MagicMock(side_effect=lambda x: x)
+    event.send = AsyncMock(side_effect=RuntimeError("temporary network error"))
+    sender._send_onebot_forward = AsyncMock(
+        side_effect=[RuntimeError("forward timeout"), True]
+    )
+    sender._retry_forward_with_transport = AsyncMock(return_value=False)
+
+    ok = await sender._send_event_forward_chunk(
+        event, "u", "https://nitter.example", [tweet]
+    )
+
+    assert ok is True
+    assert sender._send_onebot_forward.await_count == 2
+    no_video_nodes = sender._send_onebot_forward.await_args_list[1].args[1]
+    assert no_video_nodes, "no-video retry should still send tweet nodes"
+    assert all(
+        seg.get("type") != "video"
+        for node in no_video_nodes
+        for seg in node["data"]["content"]
     )
 
 
