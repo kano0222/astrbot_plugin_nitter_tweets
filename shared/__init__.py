@@ -48,6 +48,7 @@ try:
     from .observability import (
         LOG_PREFIX,
         format_elapsed,
+        redact_instance_urls,
         safe_log,
         safe_task_log,
         sanitize_diagnostic,
@@ -57,6 +58,7 @@ except ImportError:
     from observability import (
         LOG_PREFIX,
         format_elapsed,
+        redact_instance_urls,
         safe_log,
         safe_task_log,
         sanitize_diagnostic,
@@ -107,6 +109,7 @@ __all__ = [
     "safe_log",
     "safe_task_log",
     "sanitize_diagnostic",
+    "redact_instance_urls",
     "sanitize_sensitive_text",
     "strip_external_links",
 ]

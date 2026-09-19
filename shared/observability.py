@@ -113,6 +113,7 @@ _SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"([\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;}\]]+)"
 )
 _URL_QUERY_RE = re.compile(r"(https?://[^\s/?#]+(?:/[^\s?#]*)?)\?[^\s)]+")
+_BARE_URL_RE = re.compile(r"https?://\S+")
 _WS_RE = re.compile(r"\s+")
 
 
@@ -141,6 +142,17 @@ def sanitize_sensitive_text(text: str) -> str:
     text = _BEARER_RE.sub("Bearer ***", text)
     text = _SENSITIVE_ASSIGNMENT_RE.sub(r"\1\2***", text)
     return text
+
+
+def redact_instance_urls(text: str) -> str:
+    """Replace bare instance URLs with a placeholder.
+
+    Defense-in-depth for aggregated fetch-error text: 自建实例地址不得进入
+    摘要消息或日志，序号化遗漏的残余 URL（含异常文本里嵌入的请求地址）在此兜底。
+    """
+    if not text:
+        return ""
+    return _BARE_URL_RE.sub("实例地址", text)
 
 
 def sanitize_diagnostic(value: object) -> str:

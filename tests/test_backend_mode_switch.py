@@ -224,12 +224,12 @@ async def test_multi_blogger_partial_success_incremental_nitter_fallback():
     assert results_by_user["bob"].instance == "http://nitter.test"
     assert results_by_user["bob"].host_attempts == [
         "FxTwitter=失败",
-        "http://nitter.test=成功",
+        "Nitter=成功",
     ]
     assert results_by_user["carol"].instance == "http://nitter.test"
     assert results_by_user["carol"].host_attempts == [
         "FxTwitter=失败",
-        "http://nitter.test=成功",
+        "Nitter=成功",
     ]
 
 
@@ -312,7 +312,7 @@ async def test_multi_blogger_first_failure_preserves_order_and_indices_single_ni
     assert [r.index for r in results] == [0, 1, 2]
     # First blogger fell back to Nitter
     assert results[0].instance == "http://nitter.test"
-    assert results[0].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    assert results[0].host_attempts == ["FxTwitter=失败", "Nitter=成功"]
     # Subsequent bloggers succeeded on FX
     assert results[1].instance == "FxTwitter"
     assert results[1].host_attempts == ["FxTwitter=成功"]
@@ -364,9 +364,9 @@ async def test_multi_blogger_first_failures_preserves_order_and_indices_merged_n
     assert [r.username for r in results] == ["alice", "bob", "carol"]
     assert [r.index for r in results] == [0, 1, 2]
     assert results[0].instance == "http://nitter.test"
-    assert results[0].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    assert results[0].host_attempts == ["FxTwitter=失败", "Nitter=成功"]
     assert results[1].instance == "http://nitter.test"
-    assert results[1].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    assert results[1].host_attempts == ["FxTwitter=失败", "Nitter=成功"]
     assert results[2].instance == "FxTwitter"
     assert results[2].host_attempts == ["FxTwitter=成功"]
 
@@ -410,7 +410,7 @@ async def test_multi_blogger_middle_failure_preserves_order_and_indices_single_n
     assert results[0].instance == "FxTwitter"
     assert results[0].host_attempts == ["FxTwitter=成功"]
     assert results[1].instance == "http://nitter.test"
-    assert results[1].host_attempts == ["FxTwitter=失败", "http://nitter.test=成功"]
+    assert results[1].host_attempts == ["FxTwitter=失败", "Nitter=成功"]
     assert results[2].instance == "FxTwitter"
     assert results[2].host_attempts == ["FxTwitter=成功"]
 
@@ -1227,12 +1227,12 @@ def test_scheduler_log_fxtwitter_instance_and_fallback_trace():
         group_name="测试组",
         group_type="blogger",
         users=["bob"],
-        source_attempts={"bob": ["FxTwitter=失败", "http://nitter.test=成功"]},
+        source_attempts={"bob": ["FxTwitter=失败", "Nitter=成功"]},
     )
     log_fallback = res_fallback.format_structured_task_log()
-    assert "生效实例: http://nitter.test" in log_fallback
+    assert "生效实例: Nitter" in log_fallback
     assert "轮换轨迹" in log_fallback
-    assert "FxTwitter[失败] ➔ http://nitter.test[成功]" in log_fallback
+    assert "FxTwitter[失败] ➔ Nitter[成功]" in log_fallback
 
 
 @pytest.mark.asyncio

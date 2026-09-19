@@ -308,12 +308,12 @@ class ManualCommandMixin:
                     nitter_inst, tweets = await self.nitter.fetch_user(
                         username, limit, **fetch_kwargs
                     )
-                    instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
+                    instance = "Nitter"
                 except TypeError:
                     nitter_inst, tweets = await self.nitter.fetch_user(
                         username, limit, filter_reposts=effective_filter_reposts
                     )
-                    instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
+                    instance = "Nitter"
                     if is_media_only and tweets:
                         tweets = [t for t in tweets if bool(t.media)]
                 if is_video_mode and tweets:
@@ -559,7 +559,7 @@ class ManualCommandMixin:
                     max_pages=pages,
                     sort=effective_sort or None,
                 )
-                instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
+                instance = "Nitter"
             except TypeError:
                 try:
                     nitter_inst, fetched = await asyncio.to_thread(
@@ -568,7 +568,7 @@ class ManualCommandMixin:
                         fetch_limit,
                         sort=effective_sort or None,
                     )
-                    instance = f"Nitter ({nitter_inst})" if nitter_inst else "Nitter"
+                    instance = "Nitter"
                 except Exception as exc:
                     logger.warning(
                         f"[NitterTweets] 搜索失败 query={sanitize_sensitive_text(query)!r}: {sanitize_sensitive_text(str(exc))}"

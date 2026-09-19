@@ -8,6 +8,7 @@ try:
         TweetItem,
         format_subscription_count,
         format_subscription_source,
+        redact_instance_urls,
         sanitize_diagnostic,
     )
     from ..shared.group_ids import DEFAULT_GROUP_NAME, GLOBAL_GROUP_ID
@@ -18,6 +19,7 @@ except ImportError:
         TweetItem,
         format_subscription_count,
         format_subscription_source,
+        redact_instance_urls,
         sanitize_diagnostic,
     )
     from shared.group_ids import DEFAULT_GROUP_NAME, GLOBAL_GROUP_ID
@@ -503,7 +505,9 @@ class ScheduledCheckResult:
         # Failures detail
         if self.failed_users:
             failed_items = [
-                sanitize_diagnostic(f"{self._failure_label(user)}: {error}")
+                sanitize_diagnostic(
+                    redact_instance_urls(f"{self._failure_label(user)}: {error}")
+                )
                 for user, error in self.failed_users.items()
             ]
             lines.append(
@@ -557,7 +561,9 @@ class ScheduledCheckResult:
             )
         if self.failed_users:
             failed_items = [
-                sanitize_diagnostic(f"{self._failure_label(user)}: {error}")
+                sanitize_diagnostic(
+                    redact_instance_urls(f"{self._failure_label(user)}: {error}")
+                )
                 for user, error in self.failed_users.items()
             ]
             lines.append(
@@ -708,7 +714,7 @@ class ScheduledCheckResult:
 
         if self.baseline_rebuild_failed_users:
             items = [
-                f"{self._subscription_label(user)}: {error}"
+                f"{self._subscription_label(user)}: {redact_instance_urls(error)}"
                 for user, error in self.baseline_rebuild_failed_users.items()
             ]
             lines.append(
@@ -784,7 +790,7 @@ class ScheduledCheckResult:
 
         if self.failed_users:
             items = [
-                f"{self._failure_label(user)}: {error}"
+                f"{self._failure_label(user)}: {redact_instance_urls(error)}"
                 for user, error in self.failed_users.items()
             ]
             lines.append("失败: " + _format_limited_values(items, separator="; "))

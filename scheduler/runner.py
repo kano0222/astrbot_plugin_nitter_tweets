@@ -15,7 +15,11 @@ try:
         parse_config_bool,
         resolve_hide_original_when_translated,
     )
-    from ..shared import format_subscription_source
+    from ..shared import (
+        format_subscription_source,
+        redact_instance_urls,
+        sanitize_sensitive_text,
+    )
     from ..shared.group_ids import GLOBAL_GROUP_ID
     from ..storage import StorageAdapter
     from .config import (
@@ -67,7 +71,11 @@ except ImportError:
     from scheduler.runner_seen import SchedulerSeenMixin
     from scheduler.runner_send import SchedulerSendMixin
     from scheduler.runner_status import SchedulerStatusMixin
-    from shared import format_subscription_source
+    from shared import (
+        format_subscription_source,
+        redact_instance_urls,
+        sanitize_sensitive_text,
+    )
     from shared.group_ids import GLOBAL_GROUP_ID
     from storage import StorageAdapter
 
@@ -802,13 +810,15 @@ class NitterTweetScheduler(
                 if fetch_result.host_attempts:
                     result.source_attempts[username] = list(fetch_result.host_attempts)
                 elif fetch_result.instance:
-                    result.source_attempts[username] = ["成功"]
+                    result.source_attempts[username] = ["Nitter=成功"]
                 if fetch_result.error:
                     result.source_statuses[username] = SourceStatus.FAILED
-                    result.failed_users[username] = fetch_result.error.message
+                    result.failed_users[username] = redact_instance_urls(
+                        fetch_result.error.message
+                    )
                     logger.warning(
                         f"[NitterTweets] 定时抓取 {source_label} 失败: "
-                        f"{fetch_result.error.message}"
+                        f"{sanitize_sensitive_text(fetch_result.error.message)}"
                     )
                     continue
 

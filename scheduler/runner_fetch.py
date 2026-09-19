@@ -14,7 +14,12 @@ try:
     from ..config import config_get, parse_config_bool
     from ..media_support.client import NitterClient
     from ..media_support.fxtwitter_client import FxTwitterClient
-    from ..shared import TweetItem, format_subscription_source, sanitize_sensitive_text
+    from ..shared import (
+        TweetItem,
+        format_subscription_source,
+        redact_instance_urls,
+        sanitize_sensitive_text,
+    )
     from .config import ScheduleGroup
     from .models import SchedulerTaskError, SourceStatus, UserFetchResult
 except ImportError:
@@ -23,7 +28,12 @@ except ImportError:
     from media_support.fxtwitter_client import FxTwitterClient
     from scheduler.config import ScheduleGroup
     from scheduler.models import SchedulerTaskError, SourceStatus, UserFetchResult
-    from shared import TweetItem, format_subscription_source, sanitize_sensitive_text
+    from shared import (
+        TweetItem,
+        format_subscription_source,
+        redact_instance_urls,
+        sanitize_sensitive_text,
+    )
 
 
 def _classify_html_fetch(
@@ -260,11 +270,7 @@ class SchedulerFetchMixin:
                     )
             for res in nitter_batches:
                 res.index = account_to_original_index.get(res.username, res.index)
-                nitter_attempt = (
-                    f"{res.instance or 'Nitter'}=成功"
-                    if not res.error
-                    else f"{res.instance or 'Nitter'}=失败"
-                )
+                nitter_attempt = "Nitter=成功" if not res.error else "Nitter=失败"
                 res.host_attempts = [
                     "FxTwitter=失败",
                     *(res.host_attempts or [nitter_attempt]),
@@ -360,7 +366,7 @@ class SchedulerFetchMixin:
                     media=skip_plain_text and filter_reposts,
                 )
             except Exception as exc:
-                error_label = sanitize_sensitive_text(str(exc))
+                error_label = sanitize_sensitive_text(redact_instance_urls(str(exc)))
                 logger.warning(
                     f"[NitterTweets] 合并 RSS 抓取失败，回退逐个请求: "
                     f"group={group.group_id}, batch={batch_i + 1}/{len(batches)}, "
@@ -407,7 +413,7 @@ class SchedulerFetchMixin:
                             plain_text_filtered=int(
                                 scan_result.plain_text_filtered or 0
                             ),
-                            host_attempts=[f"{instance or 'Nitter'}=成功"],
+                            host_attempts=["Nitter=成功"],
                         )
                     )
                 else:
@@ -519,11 +525,7 @@ class SchedulerFetchMixin:
 
         def _with_fx_fallback(res: UserFetchResult) -> UserFetchResult:
             if fx_failed_attempt:
-                nitter_attempt = (
-                    f"{res.instance or 'Nitter'}=成功"
-                    if not res.error
-                    else f"{res.instance or 'Nitter'}=失败"
-                )
+                nitter_attempt = "Nitter=成功" if not res.error else "Nitter=失败"
                 res.host_attempts = [
                     fx_failed_attempt,
                     *(res.host_attempts or [nitter_attempt]),
@@ -690,7 +692,8 @@ class SchedulerFetchMixin:
             )
         except Exception as exc:
             logger.warning(
-                f"[NitterTweets] HTML 用户页回退失败: @{username}, error={exc}"
+                f"[NitterTweets] HTML 用户页回退失败: @{username}, "
+                f"error={sanitize_sensitive_text(redact_instance_urls(str(exc)))}"
             )
             return None
         if not tweets:
@@ -829,11 +832,7 @@ class SchedulerFetchMixin:
             scan_watermark=scan_watermark,
         )
         if fx_failed_attempt:
-            nitter_attempt = (
-                f"{res.instance or 'Nitter'}=成功"
-                if not res.error
-                else f"{res.instance or 'Nitter'}=失败"
-            )
+            nitter_attempt = "Nitter=成功" if not res.error else "Nitter=失败"
             res.host_attempts = [
                 fx_failed_attempt,
                 *(res.host_attempts or [nitter_attempt]),
@@ -914,13 +913,14 @@ class SchedulerFetchMixin:
             tweets = list(tweets)
             self._log_verbose_info(
                 f"[NitterTweets] 搜索订阅抓取成功: group={group.group_id}, "
-                f"source={source_label}, instance={instance}, "
+                f"source={source_label}, "
                 f"tweets={len(tweets)}"
             )
         except Exception as exc:
             logger.warning(
                 f"[NitterTweets] 搜索订阅抓取失败: group={group.group_id}, "
-                f"source={source_label}, error={type(exc).__name__}: {exc}"
+                f"source={source_label}, "
+                f"error={sanitize_sensitive_text(redact_instance_urls(str(exc)))}"
             )
             return UserFetchResult(
                 index=index,
@@ -995,7 +995,7 @@ class SchedulerFetchMixin:
             if tweets or scan_result.complete:
                 self._log_verbose_info(
                     f"[NitterTweets] List RSS 抓取成功: group={group.group_id}, "
-                    f"source={source_label}, instance={instance}, "
+                    f"source={source_label}, "
                     f"tweets={len(tweets)}"
                 )
                 return UserFetchResult(
@@ -1011,7 +1011,7 @@ class SchedulerFetchMixin:
                 )
         except Exception as exc:
             rss_error = exc
-            error_label = sanitize_sensitive_text(str(exc))
+            error_label = sanitize_sensitive_text(redact_instance_urls(str(exc)))
             logger.warning(
                 f"[NitterTweets] List RSS 抓取失败，尝试 HTML 后备: "
                 f"group={group.group_id}, source={source_label}, "
@@ -1041,13 +1041,14 @@ class SchedulerFetchMixin:
             tweets = list(tweets)
             self._log_verbose_info(
                 f"[NitterTweets] List HTML 后备抓取成功: group={group.group_id}, "
-                f"source={source_label}, instance={instance}, "
+                f"source={source_label}, "
                 f"tweets={len(tweets)}"
             )
         except Exception as exc:
             logger.warning(
                 f"[NitterTweets] List 抓取失败: group={group.group_id}, "
-                f"source={source_label}, error={type(exc).__name__}: {exc}"
+                f"source={source_label}, "
+                f"error={sanitize_sensitive_text(redact_instance_urls(str(exc)))}"
             )
             if rss_error is not None:
                 return UserFetchResult(
