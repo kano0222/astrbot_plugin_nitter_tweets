@@ -129,11 +129,23 @@ class WebAPIConfigMixin:
                 )
             grouped_updates[group_key][key] = value
             values[key] = value
+        original_groups = {
+            group_key: (group_key in config, config.get(group_key))
+            for group_key in grouped_updates
+        }
         for group_key, group in grouped_updates.items():
             config[group_key] = group
         save_config = getattr(config, "save_config", None)
         if callable(save_config):
-            save_config()
+            try:
+                save_config()
+            except Exception:
+                for group_key, (existed, original_group) in original_groups.items():
+                    if existed:
+                        config[group_key] = original_group
+                    else:
+                        config.pop(group_key, None)
+                raise
         return self._ok(values=values, count=len(values))
 
     async def save_config_and_reload(self, data: dict[str, Any]) -> dict[str, Any]:

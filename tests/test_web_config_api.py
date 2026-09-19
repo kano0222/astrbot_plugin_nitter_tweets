@@ -6,6 +6,8 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from plugin_api.api_config import WebAPIConfigMixin
 
 
@@ -128,6 +130,33 @@ def test_batch_update_is_atomic_and_saves_once():
     assert invalid["success"] is False
     assert invalid_config == {}
     assert invalid_config.saved == 0
+
+
+def test_batch_update_restores_config_when_save_fails():
+    class _FailingConfig(_FakeConfig):
+        def save_config(self):
+            self.saved += 1
+            raise OSError("save failed")
+
+    original_basic = {"default_limit": 7, "request_timeout": 12}
+    config = _FailingConfig({"basic": original_basic})
+    host = _Host(config)
+
+    with pytest.raises(OSError, match="save failed"):
+        asyncio.run(
+            host.update_config_items(
+                {
+                    "changes": {
+                        "default_limit": "15",
+                        "send_image_attachments": False,
+                    }
+                }
+            )
+        )
+
+    assert config == {"basic": original_basic}
+    assert config["basic"] is original_basic
+    assert config.saved == 1
 
 
 def test_save_config_reloads_exact_current_plugin_once():
