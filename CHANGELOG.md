@@ -19,6 +19,18 @@
 - **配置 Schema 与文档描述精简**：
   - 精简澄清 `filter_plain_text_enabled`（只推包含图片/视频推文）与 `media_only_enabled`（只发媒体图片/视频，去除正文文本与翻译）。
   - 完善 `media_max_size_mb` 与 `send_video_attachments` 的特性说明。
+- **极简纯净模式（`send_batch_summary_enabled` 语义升级）**：
+  - 关闭该配置后开启极简纯净模式：全链路（定时、间隔、手动命令）不再发送任何批次横幅与合并统计头节点，推文末尾的 📎 附件统计行也一并省略，仅保留推文核心内容。
+  - 调度端（`runner_send`）动态置空目标批次概括，渲染端（`TweetMessageRenderer`）同步按开关省略统计节点与附件统计行；开启时行为不变（Close #74 语义延续）。
+- **视频节点纯媒体化**：
+  - 合并转发与逐条推送中的视频/GIF 独立节点（`build_video_node_components` / `_build_onebot_video_content`）不再附加「视频/GIF 附件」文字说明节点，直接发送纯视频，减少重复占位文本。
+- **合并转发降级链与节点信封修复**：
+  - 修复事件路径合并转发连续失败后的去视频降级：`build_onebot_nodes` 现已支持 `exclude_videos`（与合并批量构造器对齐），此前该参数会被 TypeError 中断，导致去视频重发、二分拆分与直发降级整条链路失效。
+  - OneBot raw 直发节点信封统一为 OneBot v11 标准字段 `user_id` / `nickname`（原为 AstrBot 组件属性名 `uin` / `name`），与组件路径（`Node.to_dict()`）及协议规范保持一致；节点取值不变，NapCat / LLOneBot 两种字段写法均兼容。
+- **自建实例地址全面脱敏**：
+  - 定时检查摘要「失败」行、失败详情与后台日志不再泄露自建 Nitter 实例地址：RSS 重试错误串、HTML 轮换错误文本与实例切换日志全部改用轮换序号标签（`#1`、`#2`），「实例结果」「生效实例」「轮换轨迹」统一以 `Nitter` / `FxTwitter` 后端命名。
+  - 新增聚合层兜底 `redact_instance_urls`：摘要与错误汇总中的残余裸 URL 一律替换为「实例地址」，防止新增错误路径再嵌入地址。
+  - 多轮重试失败计数文案修正：此前按轮次累计会输出「已尝试 2/1 个 Nitter 实例」，现改为「已尝试 1 个 Nitter 实例共 2 次请求（含重试）」。
 
 ## [1.6.1] - 2026-09-18
 
