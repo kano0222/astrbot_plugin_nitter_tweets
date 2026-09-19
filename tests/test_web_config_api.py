@@ -99,6 +99,115 @@ def test_update_coerces_and_writes_grouped_location():
     assert config.saved == 1
 
 
+def test_batch_update_is_atomic_and_saves_once():
+    config = _FakeConfig()
+    host = _Host(config)
+    result = asyncio.run(
+        host.update_config_items(
+            {
+                "changes": {
+                    "default_limit": "15",
+                    "send_image_attachments": False,
+                }
+            }
+        )
+    )
+    assert result["success"] is True
+    assert result["count"] == 2
+    assert config["basic"]["default_limit"] == 15
+    assert config["media"]["send_image_attachments"] is False
+    assert config.saved == 1
+
+    invalid_config = _FakeConfig()
+    invalid_host = _Host(invalid_config)
+    invalid = asyncio.run(
+        invalid_host.update_config_items(
+            {"changes": {"default_limit": "15", "request_timeout": "bad"}}
+        )
+    )
+    assert invalid["success"] is False
+    assert invalid_config == {}
+    assert invalid_config.saved == 0
+
+
+def test_save_config_reloads_exact_current_plugin_once():
+    config = _FakeConfig()
+    calls = []
+
+    class _Manager:
+        async def reload(self, plugin_name):
+            calls.append(plugin_name)
+            return True, None
+
+    plugin = SimpleNamespace()
+    metadata = SimpleNamespace(name="astrbot_plugin_nitter_tweets", star_cls=plugin)
+    plugin.context = SimpleNamespace(
+        _star_manager=_Manager(), get_all_stars=lambda: [metadata]
+    )
+    host = _Host(config)
+    host.plugin = plugin
+
+    result = asyncio.run(
+        host.save_config_and_reload({"changes": {"default_limit": "9"}})
+    )
+
+    assert result["success"] is True
+    assert result["reloaded"] is True
+    assert config.saved == 1
+    assert calls == ["astrbot_plugin_nitter_tweets"]
+
+
+def test_save_config_does_not_reload_when_validation_fails():
+    config = _FakeConfig()
+    calls = []
+
+    class _Manager:
+        async def reload(self, plugin_name):
+            calls.append(plugin_name)
+            return True, None
+
+    plugin = SimpleNamespace()
+    metadata = SimpleNamespace(name="astrbot_plugin_nitter_tweets", star_cls=plugin)
+    plugin.context = SimpleNamespace(
+        _star_manager=_Manager(), get_all_stars=lambda: [metadata]
+    )
+    host = _Host(config)
+    host.plugin = plugin
+
+    result = asyncio.run(
+        host.save_config_and_reload({"changes": {"request_timeout": "bad"}})
+    )
+
+    assert result["success"] is False
+    assert config.saved == 0
+    assert calls == []
+
+
+def test_save_config_reports_saved_when_reload_fails():
+    config = _FakeConfig()
+
+    class _Manager:
+        async def reload(self, plugin_name):
+            return False, "reload failed"
+
+    plugin = SimpleNamespace()
+    metadata = SimpleNamespace(name="astrbot_plugin_nitter_tweets", star_cls=plugin)
+    plugin.context = SimpleNamespace(
+        _star_manager=_Manager(), get_all_stars=lambda: [metadata]
+    )
+    host = _Host(config)
+    host.plugin = plugin
+
+    result = asyncio.run(
+        host.save_config_and_reload({"changes": {"default_limit": "11"}})
+    )
+
+    assert result["success"] is True
+    assert result["saved"] is True
+    assert result["reloaded"] is False
+    assert config.saved == 1
+
+
 def test_update_rejects_bad_number_and_option():
     config = _FakeConfig()
     host = _Host(config)
