@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import sys
 import types
 import unittest
@@ -8,17 +9,33 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-astrbot_module = sys.modules.get("astrbot", types.ModuleType("astrbot"))
-astrbot_api_module = sys.modules.get("astrbot.api", types.ModuleType("astrbot.api"))
-astrbot_api_all_module = sys.modules.get(
-    "astrbot.api.all", types.ModuleType("astrbot.api.all")
+
+def _ensure_astrbot_module(name: str) -> tuple[types.ModuleType, bool]:
+    """Import the real astrbot module when importable, otherwise install a stub.
+
+    Returns ``(module, is_stub)``. Fake classes are only assigned to stubs:
+    patching a real AstrBot installation leaks into every later test module
+    (e.g. ``command_handlers.manual`` binding the fake ``MessageChain``
+    depending on collection order).
+    """
+    try:
+        return importlib.import_module(name), False
+    except Exception:
+        stub = types.ModuleType(name)
+        sys.modules[name] = stub
+        return stub, True
+
+
+astrbot_module, astrbot_is_stub = _ensure_astrbot_module("astrbot")
+astrbot_api_module, astrbot_api_is_stub = _ensure_astrbot_module("astrbot.api")
+astrbot_api_all_module, astrbot_api_all_is_stub = _ensure_astrbot_module(
+    "astrbot.api.all"
 )
-astrbot_api_event_module = sys.modules.get(
-    "astrbot.api.event", types.ModuleType("astrbot.api.event")
+astrbot_api_event_module, astrbot_api_event_is_stub = _ensure_astrbot_module(
+    "astrbot.api.event"
 )
-astrbot_api_message_components_module = sys.modules.get(
-    "astrbot.api.message_components",
-    types.ModuleType("astrbot.api.message_components"),
+astrbot_api_message_components_module, astrbot_api_message_components_is_stub = (
+    _ensure_astrbot_module("astrbot.api.message_components")
 )
 
 
@@ -128,58 +145,53 @@ def _register(*args, **kwargs):
     return decorator
 
 
-astrbot_api_star_module = sys.modules.get(
-    "astrbot.api.star", types.ModuleType("astrbot.api.star")
+astrbot_api_star_module, astrbot_api_star_is_stub = _ensure_astrbot_module(
+    "astrbot.api.star"
 )
-astrbot_core_command_module = sys.modules.get(
-    "astrbot.core.star.filter.command",
-    types.ModuleType("astrbot.core.star.filter.command"),
+astrbot_core_command_module, astrbot_core_command_is_stub = _ensure_astrbot_module(
+    "astrbot.core.star.filter.command"
 )
-astrbot_core_module = sys.modules.get("astrbot.core", types.ModuleType("astrbot.core"))
-astrbot_core_message_module = sys.modules.get(
-    "astrbot.core.message", types.ModuleType("astrbot.core.message")
+astrbot_core_module, astrbot_core_is_stub = _ensure_astrbot_module("astrbot.core")
+astrbot_core_message_module, astrbot_core_message_is_stub = _ensure_astrbot_module(
+    "astrbot.core.message"
 )
-astrbot_core_message_components_module = sys.modules.get(
-    "astrbot.core.message.components",
-    types.ModuleType("astrbot.core.message.components"),
+astrbot_core_message_components_module, astrbot_core_message_components_is_stub = (
+    _ensure_astrbot_module("astrbot.core.message.components")
 )
 
 
-astrbot_api_module.logger = _Logger()
-astrbot_api_all_module.At = _At
-astrbot_api_all_module.AstrBotConfig = dict
-astrbot_api_all_module.Context = object
-astrbot_api_all_module.MessageChain = _MessageChain
-astrbot_api_all_module.Plain = _Plain
-astrbot_api_all_module.Star = _Star
-astrbot_api_all_module.logger = astrbot_api_module.logger
-astrbot_api_event_module.MessageChain = _MessageChain
-astrbot_api_event_module.AstrMessageEvent = object
-astrbot_api_event_module.filter = _Filter
-astrbot_api_message_components_module.Plain = _Plain
-astrbot_api_message_components_module.Image = _Image
-astrbot_api_message_components_module.Video = _Video
-astrbot_api_message_components_module.Node = _Node
-astrbot_api_message_components_module.Nodes = _Nodes
-astrbot_api_star_module.register = _register
-astrbot_core_command_module.GreedyStr = str
-astrbot_core_message_components_module.Image = _Image
-astrbot_core_message_components_module.Video = _Video
-astrbot_core_message_components_module.Node = _Node
-astrbot_core_message_components_module.Nodes = _Nodes
-astrbot_core_message_components_module.Plain = _Plain
-sys.modules["astrbot"] = astrbot_module
-sys.modules["astrbot.api"] = astrbot_api_module
-sys.modules["astrbot.api.all"] = astrbot_api_all_module
-sys.modules["astrbot.api.event"] = astrbot_api_event_module
-sys.modules["astrbot.api.message_components"] = astrbot_api_message_components_module
-sys.modules["astrbot.api.star"] = astrbot_api_star_module
-sys.modules["astrbot.core"] = astrbot_core_module
-sys.modules["astrbot.core.message"] = astrbot_core_message_module
-sys.modules["astrbot.core.message.components"] = astrbot_core_message_components_module
-sys.modules["astrbot.core.star.filter.command"] = astrbot_core_command_module
+if astrbot_api_is_stub:
+    astrbot_api_module.logger = _Logger()
+if astrbot_api_all_is_stub:
+    astrbot_api_all_module.At = _At
+    astrbot_api_all_module.AstrBotConfig = dict
+    astrbot_api_all_module.Context = object
+    astrbot_api_all_module.MessageChain = _MessageChain
+    astrbot_api_all_module.Plain = _Plain
+    astrbot_api_all_module.Star = _Star
+    astrbot_api_all_module.logger = getattr(astrbot_api_module, "logger", _Logger())
+if astrbot_api_event_is_stub:
+    astrbot_api_event_module.MessageChain = _MessageChain
+    astrbot_api_event_module.AstrMessageEvent = object
+    astrbot_api_event_module.filter = _Filter
+if astrbot_api_message_components_is_stub:
+    astrbot_api_message_components_module.Plain = _Plain
+    astrbot_api_message_components_module.Image = _Image
+    astrbot_api_message_components_module.Video = _Video
+    astrbot_api_message_components_module.Node = _Node
+    astrbot_api_message_components_module.Nodes = _Nodes
+if astrbot_api_star_is_stub:
+    astrbot_api_star_module.register = _register
+if astrbot_core_command_is_stub:
+    astrbot_core_command_module.GreedyStr = str
+if astrbot_core_message_components_is_stub:
+    astrbot_core_message_components_module.Image = _Image
+    astrbot_core_message_components_module.Video = _Video
+    astrbot_core_message_components_module.Node = _Node
+    astrbot_core_message_components_module.Nodes = _Nodes
+    astrbot_core_message_components_module.Plain = _Plain
 
-if "rendering.tweets" in sys.modules:
+if astrbot_api_message_components_is_stub and "rendering.tweets" in sys.modules:
     tweet_rendering_module = sys.modules["rendering.tweets"]
     tweet_rendering_module.Plain = _Plain
     tweet_rendering_module.Image = _Image
