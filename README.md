@@ -1,7 +1,7 @@
 # 推文订阅
 
 <p align="center">
-  <a href="https://github.com/shitianyaa/astrbot_plugin_nitter_tweets/releases"><img alt="Version" src="https://img.shields.io/badge/version-1.6.0-blue?style=for-the-badge" /></a>
+  <a href="https://github.com/shitianyaa/astrbot_plugin_nitter_tweets/releases"><img alt="Version" src="https://img.shields.io/badge/version-1.7.0-blue?style=for-the-badge" /></a>
   <a href="https://github.com/shitianyaa/astrbot_plugin_nitter_tweets/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/shitianyaa/astrbot_plugin_nitter_tweets?style=for-the-badge&color=blue" /></a>
   <a href="https://github.com/Soulter/AstrBot"><img alt="AstrBot" src="https://img.shields.io/badge/AstrBot-plugin-00A86B?style=for-the-badge" /></a>
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
@@ -175,7 +175,7 @@ List 通过配置文件或 WebUI 添加 ID，暂无导入命令。
 | `default_limit` | 手动命令默认条数 |
 | `search_sort` | 搜索排序方式：`latest`（按时间序，默认）或 `top`（推特综合热门算法流）；手动搜索带「热门」可单次覆盖 |
 | `schedule_enabled` | 后台检查总开关 |
-| `send_batch_summary_enabled` | 是否发送批次概括横幅（默认开）；关闭后普通推送不再单独发送“📬 默认分组…”横幅，仅逐条推送推文卡片（合并转发不受影响） |
+| `send_batch_summary_enabled` | 是否发送推送统计与概括摘要（默认开）；关闭后进入极简纯净模式，全链路不再发送批次横幅、合并统计头节点及推文末尾的 📎 附件统计行，仅保留推文核心内容 |
 | `push.target_blocked_users` | 按完整 UMO 保存作者黑名单；命令和 Dashboard 维护，跨分组共享 |
 | `tweet_groups` | 订阅与推送分组 |
 | `filter_reposts_enabled` | 后台转发过滤（全局；分组还有子开关） |

@@ -9,6 +9,56 @@
 - Dashboard「插件配置」改为一次校验并批量保存全部草稿，保存成功后只热重载当前插件；保存成功但重载失败时保留配置并显示明确提示。
 - Dashboard 配置操作条和分组导航根据实际页头高度动态计算 sticky 偏移，在不同窗口宽度下保持可见且不遮挡页头。
 
+## [1.7.0] - 2026-09-18
+
+### Added & Fixed
+
+- **统一媒体管线与多分辨率自适应降级**：
+  - 彻底打通 FxTwitter、Nitter HTML 及被动链接的完整视频多格式（4K、1080p、720p、480p 等）候选池，杜绝过早硬编码单一画质导致候选丢失。
+  - 修复 FxTwitter 大视频在超出大小上限时无法自动降级直接被跳过的断层缺陷；当选中画质超过 `media_max_size_mb` 时，自动顺延向下借档（例如 4K 32MB 超限自动降为 1080p 9.3MB 顺畅发送）。
+  - Nitter RSS 媒体解析优先走内部 `status_resolve` 极速获取官方 CDN 变体池，降低对外部不可控第三方 `xdown.app` 的依赖。
+- **推图指令视频专线与特许放行**：
+  - 指令 `/推图` 支持类型参数：`/推图 用户名 [数量] [视频/图片]` 与 `/推图 用户名 [视频/图片]`。
+  - 显式指定视频时，上游结合多页翻页专线搜集视频推文，发送层局部特许放行视频下载与发送（`force_media=True`），零全局状态污染。
+- **风控二分排雷提速与日志降噪**：
+  - 合并转发遭遇腾讯内容风控（`retcode 1200 / res_id 校验失败`）时，跳过无意义的同包底层重复重试，毫秒级进入二分排雷，耗时大幅削减。
+  - 格式化脱敏风控警告日志，消除几十位长哈希密文视觉污染。
+- **配置 Schema 与文档描述精简**：
+  - 精简澄清 `filter_plain_text_enabled`（只推包含图片/视频推文）与 `media_only_enabled`（只发媒体图片/视频，去除正文文本与翻译）。
+  - 完善 `media_max_size_mb` 与 `send_video_attachments` 的特性说明。
+- **极简纯净模式（`send_batch_summary_enabled` 语义升级）**：
+  - 关闭该配置后开启极简纯净模式：全链路（定时、间隔、手动命令）不再发送任何批次横幅与合并统计头节点，推文末尾的 📎 附件统计行也一并省略，仅保留推文核心内容。
+  - 调度端（`runner_send`）动态置空目标批次概括，渲染端（`TweetMessageRenderer`）同步按开关省略统计节点与附件统计行；开启时行为不变（Close #74 语义延续）。
+- **视频节点纯媒体化**：
+  - 合并转发与逐条推送中的视频/GIF 独立节点（`build_video_node_components` / `_build_onebot_video_content`）不再附加「视频/GIF 附件」文字说明节点，直接发送纯视频，减少重复占位文本。
+- **合并转发降级链与节点信封修复**：
+  - 修复事件路径合并转发连续失败后的去视频降级：`build_onebot_nodes` 现已支持 `exclude_videos`（与合并批量构造器对齐），此前该参数会被 TypeError 中断，导致去视频重发、二分拆分与直发降级整条链路失效。
+  - OneBot raw 直发节点信封统一为 OneBot v11 标准字段 `user_id` / `nickname`（原为 AstrBot 组件属性名 `uin` / `name`），与组件路径（`Node.to_dict()`）及协议规范保持一致；节点取值不变，NapCat / LLOneBot 两种字段写法均兼容。
+- **自建实例地址全面脱敏**：
+  - 定时检查摘要「失败」行、失败详情与后台日志不再泄露自建 Nitter 实例地址：RSS 重试错误串、HTML 轮换错误文本与实例切换日志全部改用轮换序号标签（`#1`、`#2`），「实例结果」「生效实例」「轮换轨迹」统一以 `Nitter` / `FxTwitter` 后端命名。
+  - 新增聚合层兜底 `redact_instance_urls`：摘要与错误汇总中的残余裸 URL 一律替换为「实例地址」，防止新增错误路径再嵌入地址。
+  - 多轮重试失败计数文案修正：此前按轮次累计会输出「已尝试 2/1 个 Nitter 实例」，现改为「已尝试 1 个 Nitter 实例共 2 次请求（含重试）」。
+
+## [1.6.1] - 2026-09-18
+
+### Fixed & Improved
+
+- **URL 标准化与 Localhost 清理**：
+  - 扩展 `URL_LIKE_RE` 正则以完整匹配 `localhost`（如 `http://localhost:8080`）、IPv4 地址及通用 HTTP/HTTPS 链接。
+  - `normalize_external_links` 新增对 Nitter 引用推文链接（如 `http://localhost/username/status/123#m`）的自动识别，改写为规范的 `https://x.com/username/status/123`。
+  - `strip_external_links` 在剥离外部链接后，清理因链接被移除而残留的孤立引用破折号行（如 `^—\s*$`），避免渲染空白破折号。
+- **FxTwitter 媒体抓取翻页与 Overfetch**：
+  - `fetch_user_timeline` 实现游标跟随翻页循环（受 `max_pages` 深度控制），在纯文本过滤或转发过滤导致候选不足时自动向后翻页直至满足请求数量或游标耗尽。
+  - `skip_plain_text=True` 时首屏初始请求量提高至 `max(20, min(count * 2, 100))`，彻底消除 `count=1` 导致的 upstream HTTP 500 报错并扩大媒体候选窗口。
+- **手动命令转发过滤统一**：
+  - 手动 `/推文` 与 `/推图` 统一接入全局 `filter_reposts_enabled` 总开关，默认开启过滤转发，关闭时完整保留转发。
+  - 手动命令在调用 FxTwitter 时透传 `html_max_pages` 作为最大翻页深度限制。
+- **审计日志与触发原因文案优化**：
+  - 移除硬编码带感叹号的文案 `手动命令 (！推文检查)`；调度器日志格式化统一为 `手动检查`。
+  - `safe_task_log` 动态映射手动操作类型：`user_media` -> `推图`、`user_timeline` -> `推文`、`tweet_search` -> `推文搜索`、`tweet_pic_search` -> `推文搜图`、`trends` -> `推特热搜`、`mirror_test` -> `镜像测试`，格式化为 `手动命令 (操作名)`。
+- **配置文档与 Schema 同步**：
+  - `_conf_schema.json` 与 `docs/project/configuration.md` 更新 `html_max_pages` 说明，明确其同时控制 FxTwitter 媒体翻页深度；更新 `filter_reposts_enabled` 说明，标注手动 `/推文` 与 `/推图` 亦遵循此全局总开关。
+
 ## [1.6.0] - 2026-09-16
 
 ### Added

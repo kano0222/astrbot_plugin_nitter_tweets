@@ -22,6 +22,7 @@ from .utils import (
     PIPED_WATCH_RE,
     TRAILING_URL_PUNCT,
     URL_LIKE_RE,
+    NITTER_STATUS_URL_RE,
     TweetItem,
     TweetMedia,
     clamp_float,
@@ -38,6 +39,7 @@ from .utils import (
     normalize_external_links,
     normalize_seen_account_key,
     normalize_username,
+    register_nitter_instances,
     safe_call,
     strip_external_links,
 )
@@ -46,6 +48,7 @@ try:
     from .observability import (
         LOG_PREFIX,
         format_elapsed,
+        redact_instance_urls,
         safe_log,
         safe_task_log,
         sanitize_diagnostic,
@@ -55,6 +58,7 @@ except ImportError:
     from observability import (
         LOG_PREFIX,
         format_elapsed,
+        redact_instance_urls,
         safe_log,
         safe_task_log,
         sanitize_diagnostic,
@@ -78,6 +82,7 @@ __all__ = [
     "PIPED_WATCH_RE",
     "TRAILING_URL_PUNCT",
     "URL_LIKE_RE",
+    "NITTER_STATUS_URL_RE",
     "TweetItem",
     "TweetMedia",
     "clamp_float",
@@ -99,10 +104,12 @@ __all__ = [
     "normalize_seen_account_key",
     "normalize_stable_group_id",
     "normalize_username",
+    "register_nitter_instances",
     "safe_call",
     "safe_log",
     "safe_task_log",
     "sanitize_diagnostic",
+    "redact_instance_urls",
     "sanitize_sensitive_text",
     "strip_external_links",
 ]

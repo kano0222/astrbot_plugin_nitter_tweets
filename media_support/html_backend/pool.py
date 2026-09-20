@@ -10,8 +10,10 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 try:
+    from ...shared.observability import redact_instance_urls
     from ...shared.utils import TweetItem
 except ImportError:  # pragma: no cover
+    from shared.observability import redact_instance_urls
     from shared.utils import TweetItem
 
 try:
@@ -200,8 +202,7 @@ class HtmlNitterPool:
             if self.limiter.is_cooling(host):
                 cooling.append(base)
                 self.log(
-                    f"defer cooling {host} "
-                    f"remain={self.limiter.cooldown_remaining(host):.0f}s"
+                    f"defer cooling remain={self.limiter.cooldown_remaining(host):.0f}s"
                 )
             else:
                 ready.append(base)
@@ -241,13 +242,13 @@ class HtmlNitterPool:
                 sec = self.limiter.punish(host)
                 self.scores.record_failure(host)
                 scored_failure = True
-                self.log(f"punish {host} http={resp.code} cooldown={sec:.0f}s")
-                raise HtmlFetchError(f"{host} HTTP {resp.code}", f"HTTP {resp.code}")
+                self.log(f"punish host http={resp.code} cooldown={sec:.0f}s")
+                raise HtmlFetchError(f"HTTP {resp.code}", f"HTTP {resp.code}")
             if resp.code != 200:
                 self.scores.record_failure(host)
                 scored_failure = True
                 raise HtmlFetchError(
-                    f"{host} HTTP {resp.code}",
+                    f"HTTP {resp.code}",
                     f"HTTP {resp.code}",
                 )
             if page_kind in {"error", "other"}:
@@ -258,7 +259,7 @@ class HtmlNitterPool:
                     if page_kind == "error"
                     else ("unexpected HTML page", "异常页面")
                 )
-                raise HtmlFetchError(f"{host} {reason}", status)
+                raise HtmlFetchError(reason, status)
             self.limiter.reward(host)
             self.session.save_cookies(host)
             return resp.body
@@ -340,7 +341,7 @@ class HtmlNitterPool:
         for index, base in enumerate(hosts, 1):
             host = self.session.host_of(base)
             try:
-                self.log(f"user try {index}/{total} host={host} user={user}")
+                self.log(f"user try {index}/{total} user={user}")
                 tweets = self._paginate_user(
                     base,
                     user,
@@ -350,24 +351,19 @@ class HtmlNitterPool:
                 if tweets:
                     self.scores.record_success(host)
                     if index > 1:
-                        self.log(
-                            f"user ok after rotate host={host} tried={index}/{total}"
-                        )
+                        self.log(f"user ok after rotate tried={index}/{total}")
                     return base, tweets[:limit]
                 empty_success_base = base
                 # Alive empty timeline: soft success (aligned with RSS empty feed).
                 self.scores.record_success(host, soft=True)
-                errors.append(f"{base}: empty")
-                self.log(f"user empty host={host}, rotate next ({index}/{total})")
+                errors.append(redact_instance_urls(f"#{index}: empty"))
+                self.log(f"user empty, rotate next ({index}/{total})")
             except Exception as exc:
                 # Failures scored inside _get_html (including transport errors).
-                errors.append(f"{base}: {exc}")
-                self.log(f"user fail host={host}, rotate next ({index}/{total}): {exc}")
+                errors.append(redact_instance_urls(f"#{index}: {exc}"))
+                self.log(f"user fail, rotate next (#{index}/{total}): {exc}")
         if empty_success_base is not None:
-            self.log(
-                f"user empty after rotate hosts={total}, "
-                f"last_empty={self.session.host_of(empty_success_base)}"
-            )
+            self.log(f"user empty after rotate hosts={total}")
             return empty_success_base, []
         raise RuntimeError("HTML user failed: " + "; ".join(errors[-4:]))
 
@@ -474,10 +470,7 @@ class HtmlNitterPool:
         for index, base in enumerate(hosts, 1):
             host = self.session.host_of(base)
             try:
-                self.log(
-                    f"search try {index}/{total} host={host} "
-                    f"query={q!r} kind={resolved}"
-                )
+                self.log(f"search try {index}/{total} query={q!r} kind={resolved}")
                 tweets = self._as_search_result(
                     self._paginate_search(
                         base,
@@ -497,9 +490,7 @@ class HtmlNitterPool:
                         tweets.host_attempts = [*attempts, f"#{index}=成功"]
                     self.scores.record_success(host)
                     if index > 1:
-                        self.log(
-                            f"search ok after rotate host={host} tried={index}/{total}"
-                        )
+                        self.log(f"search ok after rotate tried={index}/{total}")
                     return base, tweets.limited(limit) if not anchor_ids else tweets
                 empty_success_base = base
                 attempts.append(f"#{index}=空结果")
@@ -516,21 +507,18 @@ class HtmlNitterPool:
                 )
                 # Empty after RT filter: soft success, not an outage.
                 self.scores.record_success(host, soft=True)
-                errors.append(f"{base}: empty")
-                self.log(f"search empty host={host}, rotate next ({index}/{total})")
+                errors.append(redact_instance_urls(f"#{index}: empty"))
+                self.log(f"search empty, rotate next ({index}/{total})")
             except Exception as exc:
                 # Failures scored inside _get_html (including transport errors).
-                errors.append(f"{base}: {exc}")
+                errors.append(redact_instance_urls(f"#{index}: {exc}"))
                 attempts.append(f"#{index}={_format_host_failure(exc)}")
-                self.log(
-                    f"search fail host={host}, rotate next ({index}/{total}): {exc}"
-                )
+                self.log(f"search fail, rotate next (#{index}/{total}): {exc}")
         if empty_success_base is not None:
             empty_success_result.host_attempts = attempts
             self.log(
                 f"search empty after rotate hosts={total}, "
                 f"query={q!r} kind={resolved}, "
-                f"last_empty={self.session.host_of(empty_success_base)}, "
                 f"attempts={'; '.join(attempts)}"
             )
             return empty_success_base, empty_success_result
@@ -622,7 +610,7 @@ class HtmlNitterPool:
         for index, base in enumerate(hosts, 1):
             host = self.session.host_of(base)
             try:
-                self.log(f"list try {index}/{total} host={host} list_id={list_id_str}")
+                self.log(f"list try {index}/{total} list_id={list_id_str}")
                 paginate_kwargs = self._repost_filter_kwargs(filter_reposts)
                 if anchor_ids is not None:
                     paginate_kwargs["anchor_ids"] = anchor_ids
@@ -639,9 +627,7 @@ class HtmlNitterPool:
                         tweets.host_attempts = [*attempts, f"#{index}=成功"]
                     self.scores.record_success(host)
                     if index > 1:
-                        self.log(
-                            f"list ok after rotate host={host} tried={index}/{total}"
-                        )
+                        self.log(f"list ok after rotate tried={index}/{total}")
                     return (
                         base,
                         tweets.limited(limit) if anchor_ids is None else tweets,
@@ -661,19 +647,18 @@ class HtmlNitterPool:
                 )
                 # Empty list: soft success (valid but no content)
                 self.scores.record_success(host, soft=True)
-                errors.append(f"{base}: empty")
-                self.log(f"list empty host={host}, rotate next ({index}/{total})")
+                errors.append(redact_instance_urls(f"#{index}: empty"))
+                self.log(f"list empty, rotate next ({index}/{total})")
             except Exception as exc:
-                errors.append(f"{base}: {exc}")
+                errors.append(redact_instance_urls(f"#{index}: {exc}"))
                 attempts.append(f"#{index}={_format_host_failure(exc)}")
-                self.log(f"list fail host={host}, rotate next ({index}/{total}): {exc}")
+                self.log(f"list fail, rotate next (#{index}/{total}): {exc}")
 
         if empty_success_base is not None:
             empty_success_result.host_attempts = attempts
             self.log(
                 f"list empty after rotate hosts={total}, "
                 f"list_id={list_id_str}, "
-                f"last_empty={self.session.host_of(empty_success_base)}, "
                 f"attempts={'; '.join(attempts)}"
             )
             return empty_success_base, empty_success_result

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from delivery.outcomes import SendAttempt, SendOutcome
 from delivery.sender import TweetSender
-from shared.utils import TweetItem
+from rendering.tweets import TweetMessageRenderer
+from shared.utils import TweetItem, TweetMedia
 
 
 class _FakeActionFailed(Exception):
@@ -99,7 +101,7 @@ async def test_event_forward_remainder_only_direct_after_partial_split(monkeypat
 
     event = MagicMock()
     event.chain_result = MagicMock(side_effect=lambda x: x)
-    event.send = AsyncMock(side_effect=_FakeActionFailed(1200))
+    event.send = AsyncMock(side_effect=RuntimeError("event.send failed"))
 
     # full(4) fail → left(2) ok → right(2) fail → direct remainder only
     results = iter([False, True, False])
@@ -139,7 +141,7 @@ async def test_event_forward_recursive_split_all_ok(monkeypatch):
 
     event = MagicMock()
     event.chain_result = MagicMock(side_effect=lambda x: x)
-    event.send = AsyncMock(side_effect=_FakeActionFailed(1200))
+    event.send = AsyncMock(side_effect=RuntimeError("event.send failed"))
 
     calls = {"onebot": 0}
 
@@ -732,3 +734,340 @@ async def test_send_forward_chunk_to_umo_reject_omits_plain_fallback_and_marks_s
     assert outcome.delivery_status == "partial_failed"
     assert outcome.delivered_status_ids == ("1000", "1001")
     sender.renderer.format_plain.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manual_forward_reject_skips_direct_fallback(monkeypatch):
+    """When forward is rejected with retcode 1200 and fallback is disabled, skip direct fallback."""
+    sender = _event_sender(monkeypatch)
+    sender.forward_reject_plain_fallback_enabled = False
+
+    event = MagicMock()
+    event.chain_result = MagicMock(side_effect=lambda x: x)
+    event.send = AsyncMock(side_effect=_FakeActionFailed(1200))
+    sender._send_onebot_forward = AsyncMock(side_effect=_FakeActionFailed(1200))
+
+    adapter = MagicMock()
+    adapter.send_event = AsyncMock(return_value=True)
+    sender._delivery_adapter_for_event = MagicMock(return_value=adapter)
+
+    tweets = _tweets(1)
+    ok = await sender._send_event_forward_chunk(
+        event, "u", "https://nitter.example", tweets
+    )
+
+    assert ok is False
+    assert sender.last_send_rejected is True
+    adapter.send_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manual_forward_reject_continues_other_split_parts(monkeypatch):
+    """During split retry, a rejected part does not abort the loop; normal parts still deliver."""
+    sender = _event_sender(monkeypatch)
+    sender.forward_reject_plain_fallback_enabled = False
+
+    event = MagicMock()
+    event.chain_result = MagicMock(side_effect=lambda x: x)
+    event.send = AsyncMock(side_effect=RuntimeError("event.send failed"))
+
+    calls = 0
+
+    async def fake_onebot(_ev, _nodes):
+        nonlocal calls
+        calls += 1
+        # 1st call: full batch (2 tweets) -> rejected
+        # 2nd call: part 0 (1 tweet) -> rejected
+        # 3rd call: part 1 (1 tweet) -> succeeds
+        if calls <= 2:
+            raise _FakeActionFailed(1200)
+        return True
+
+    sender._send_onebot_forward = AsyncMock(side_effect=fake_onebot)
+
+    adapter = MagicMock()
+    adapter.send_event = AsyncMock(return_value=True)
+    sender._delivery_adapter_for_event = MagicMock(return_value=adapter)
+
+    tweets = _tweets(2)
+    delivered_deltas: list[int] = []
+    ok = await sender._send_event_forward_chunk(
+        event,
+        "u",
+        "https://nitter.example",
+        tweets,
+        on_delivered=delivered_deltas.append,
+    )
+
+    assert ok is False
+    assert sender.last_send_rejected is True
+    assert delivered_deltas == [1]
+    adapter.send_event.assert_not_called()
+    assert calls == 3
+
+
+@pytest.mark.asyncio
+async def test_default_adapter_fallback_skips_plain_when_rejected():
+    from types import SimpleNamespace
+
+    from delivery.default import DefaultDeliveryAdapter
+
+    sender = MagicMock()
+    sender.last_send_rejected = True
+    sender.forward_reject_plain_fallback_enabled = False
+    sender._send_event_chain = AsyncMock()
+    adapter = DefaultDeliveryAdapter(sender, SimpleNamespace())
+
+    event = MagicMock()
+    ok = await adapter._send_event_fallback(
+        event, "u", "https://nitter.example", _tweets(2)
+    )
+    assert ok is False
+    sender._send_event_chain.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_default_adapter_fallback_allows_plain_when_fallback_enabled():
+    from types import SimpleNamespace
+
+    from delivery.default import DefaultDeliveryAdapter
+
+    sender = MagicMock()
+    sender.last_send_rejected = True
+    sender.forward_reject_plain_fallback_enabled = True
+    sender.renderer = MagicMock()
+    sender.renderer.format_plain = MagicMock(return_value="plain fallback")
+    sender._send_event_chain = AsyncMock(return_value=SendAttempt(success=True))
+    adapter = DefaultDeliveryAdapter(sender, SimpleNamespace())
+
+    event = MagicMock()
+    ok = await adapter._send_event_fallback(
+        event, "u", "https://nitter.example", _tweets(2)
+    )
+    assert ok is True
+    adapter.sender._send_event_chain.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_manual_partial_rejection_sends_option_a_notice():
+    from command_handlers.manual import ManualCommandMixin
+
+    class Host(ManualCommandMixin):
+        def __init__(self):
+            self.sender = MagicMock()
+            self.sender.last_send_rejected = True
+            self.sender.forward_reject_plain_fallback_enabled = False
+            self.sender.renderer = MagicMock()
+            self.sender.renderer.format_plain = MagicMock(return_value="plain")
+
+            async def send(_ev, _u, _i, _t, **kwargs):
+                on_progress = kwargs.get("on_sent_progress")
+                if callable(on_progress):
+                    on_progress(2)
+                return False
+
+            self.sender.send = AsyncMock(side_effect=send)
+
+    host = Host()
+    event = MagicMock()
+    event.plain_result = MagicMock(side_effect=lambda msg: f"PLAIN:{msg}")
+    event.send = AsyncMock()
+
+    progress: list[int] = []
+    tweets = _tweets(4)
+    result = await host._send_manual_tweets_with_fallback(
+        event,
+        "u",
+        "https://nitter.example",
+        tweets,
+        on_sent_progress=progress.append,
+    )
+
+    assert result is True
+    assert progress == [2]
+    host.sender.renderer.format_plain.assert_not_called()
+    event.send.assert_awaited_once_with("PLAIN:⚠️ 部分推文触发平台风控，已自动略过。")
+
+
+@pytest.mark.asyncio
+async def test_manual_full_rejection_sends_option_a_notice():
+    from command_handlers.manual import ManualCommandMixin
+
+    class Host(ManualCommandMixin):
+        def __init__(self):
+            self.sender = MagicMock()
+            self.sender.last_send_rejected = True
+            self.sender.forward_reject_plain_fallback_enabled = False
+            self.sender.renderer = MagicMock()
+            self.sender.renderer.format_plain = MagicMock(return_value="plain")
+            self.sender.send = AsyncMock(return_value=False)
+
+    host = Host()
+    event = MagicMock()
+    event.plain_result = MagicMock(side_effect=lambda msg: f"PLAIN:{msg}")
+    event.send = AsyncMock()
+
+    tweets = _tweets(3)
+    result = await host._send_manual_tweets_with_fallback(
+        event,
+        "u",
+        "https://nitter.example",
+        tweets,
+    )
+
+    assert result is False
+    host.sender.renderer.format_plain.assert_not_called()
+    event.send.assert_awaited_once_with("PLAIN:⚠️ 内容触发平台风控，已自动略过。")
+
+
+@pytest.mark.asyncio
+async def test_manual_rejection_with_fallback_enabled_sends_plain():
+    from command_handlers.manual import ManualCommandMixin
+
+    class Host(ManualCommandMixin):
+        def __init__(self):
+            self.sender = MagicMock()
+            self.sender.last_send_rejected = True
+            self.sender.forward_reject_plain_fallback_enabled = True
+            self.sender.renderer = MagicMock()
+            self.sender.renderer.format_plain = MagicMock(return_value="plain text")
+            self.sender.send = AsyncMock(return_value=False)
+
+    host = Host()
+    event = MagicMock()
+    event.plain_result = MagicMock(side_effect=lambda msg: f"PLAIN:{msg}")
+    event.send = AsyncMock()
+
+    tweets = _tweets(3)
+    result = await host._send_manual_tweets_with_fallback(
+        event,
+        "u",
+        "https://nitter.example",
+        tweets,
+    )
+
+    assert result is True
+    host.sender.renderer.format_plain.assert_called_once()
+    sent_arg = event.send.call_args[0][0]
+    assert hasattr(sent_arg, "chain") or "plain text" in str(sent_arg)
+
+
+@pytest.mark.asyncio
+async def test_event_forward_reject_1200_skips_onebot_raw_forward_and_logs_clean(
+    monkeypatch,
+):
+    """When event.send encounters retcode 1200 reject, skip OneBot raw forward repeated call and log clean warning."""
+    import logging
+
+    # astrbot logger 挂的是 Loguru 拦截 handler 且 propagate=False，caplog 收不到记录，
+    # 需要直接向该 logger 挂捕获 handler。
+    class _CaptureHandler(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records: list[logging.LogRecord] = []
+
+        def emit(self, record):
+            self.records.append(record)
+
+    handler = _CaptureHandler()
+    astr_logger = logging.getLogger("astrbot")
+    astr_logger.addHandler(handler)
+    try:
+        sender = _event_sender(monkeypatch)
+        sender.forward_reject_plain_fallback_enabled = False
+
+        event = MagicMock()
+        event.chain_result = MagicMock(side_effect=lambda x: x)
+        raw_res_id_msg = "发送转发消息（res_id：0123456789abcdef0123456789abcdef 失败"
+        event.send = AsyncMock(side_effect=_FakeActionFailed(1200, raw_res_id_msg))
+        sender._send_onebot_forward = AsyncMock(return_value=True)
+
+        adapter = MagicMock()
+        adapter.send_event = AsyncMock(return_value=True)
+        sender._delivery_adapter_for_event = MagicMock(return_value=adapter)
+
+        ok = await sender._send_event_forward_chunk(
+            event, "u", "https://nitter.example", _tweets(1)
+        )
+    finally:
+        astr_logger.removeHandler(handler)
+
+    assert ok is False
+    assert sender.last_send_rejected is True
+    sender._send_onebot_forward.assert_not_called()
+    adapter.send_event.assert_not_called()
+
+    warning_records = [
+        r
+        for r in handler.records
+        if r.levelno == logging.WARNING and "NitterTweets" in r.getMessage()
+    ]
+    assert any("发送合并转发节点被平台拒收" in r.getMessage() for r in warning_records)
+    # Ensure long res_id hash was not dumped in warning log
+    assert all(
+        "0123456789abcdef0123456789abcdef" not in r.getMessage()
+        for r in warning_records
+    )
+
+
+@pytest.mark.asyncio
+async def test_event_forward_no_video_retry_builds_raw_nodes_without_video_segments(
+    monkeypatch,
+):
+    """Lossy no-video retry after forward failure must build raw nodes, not crash.
+
+    Regression: build_onebot_nodes did not accept ``exclude_videos`` while
+    sender_forward passed it outside any try block, so the whole no-video /
+    split / direct degradation chain died with a TypeError whenever the first
+    two forward attempts failed with retryable errors on tweets with videos.
+    """
+    sender = _event_sender(monkeypatch)
+    # Real renderer: a MagicMock would silently swallow the bad kwarg.
+    sender.renderer = TweetMessageRenderer(send_video_attachments=True)
+    sender.forward_reject_plain_fallback_enabled = False
+
+    tweet = _tweets(1)[0]
+    tweet.media = [
+        TweetMedia("video", "https://example.test/101.mp4", path=Path("101.mp4"))
+    ]
+
+    event = MagicMock()
+    event.chain_result = MagicMock(side_effect=lambda x: x)
+    event.send = AsyncMock(side_effect=RuntimeError("temporary network error"))
+    sender._send_onebot_forward = AsyncMock(
+        side_effect=[RuntimeError("forward timeout"), True]
+    )
+    sender._retry_forward_with_transport = AsyncMock(return_value=False)
+
+    ok = await sender._send_event_forward_chunk(
+        event, "u", "https://nitter.example", [tweet]
+    )
+
+    assert ok is True
+    assert sender._send_onebot_forward.await_count == 2
+    no_video_nodes = sender._send_onebot_forward.await_args_list[1].args[1]
+    assert no_video_nodes, "no-video retry should still send tweet nodes"
+    assert all(
+        seg.get("type") != "video"
+        for node in no_video_nodes
+        for seg in node["data"]["content"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_event_forward_non_1200_error_calls_onebot_raw_forward(monkeypatch):
+    """When event.send fails with an ordinary error, OneBot raw forward rescue is still called."""
+    sender = _event_sender(monkeypatch)
+
+    event = MagicMock()
+    event.chain_result = MagicMock(side_effect=lambda x: x)
+    event.send = AsyncMock(side_effect=RuntimeError("temporary network error"))
+    sender._send_onebot_forward = AsyncMock(return_value=True)
+
+    ok = await sender._send_event_forward_chunk(
+        event, "u", "https://nitter.example", _tweets(1)
+    )
+
+    assert ok is True
+    assert sender.last_send_rejected is False
+    sender._send_onebot_forward.assert_awaited_once()

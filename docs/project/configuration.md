@@ -34,7 +34,7 @@ AstrBot WebUI 的 `tweet_groups` 添加时先选 **博主分组**（`blogger`）
 
 关注对象较多时建议优先使用 Nitter List 分组，减少逐用户抓取造成的请求量和 429；RSS 与 HTML 共用 `retry_attempts` 和 `retry_delay_seconds`。
 
-相关：`cooldown_seconds`、`search_max_limit`、`html_min_interval`、`html_max_pages`。`request_timeout`、`retry_attempts`、`retry_delay_seconds` 同时作用于 RSS 和 HTML。
+相关：`cooldown_seconds`、`search_max_limit`、`html_min_interval`、`html_max_pages`（同时控制 FxTwitter 媒体抓取及过滤翻页的最大深度）。`request_timeout`、`retry_attempts`、`retry_delay_seconds` 同时作用于 RSS 和 HTML。
 
 `auto_parse_tweet_links_enabled`（`basic`，默认 `false`）：被动解析聊天中的公开 status 链接；不进 `tweet_groups` 模板。翻译与 `show_original_when_translated` 跟随全局 AI 配置。
 
@@ -64,7 +64,7 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 - `send_target_interval` / `send_user_interval`: 分组级发送间隔（秒）；未填时回退全局同名配置，同时用于 Tag/List 订阅源之间的串行抓取间隔。
 - `max_tweets_per_check`: 单个订阅源单次检查最多推送的推文条数（`0` 不限制，范围 0-200）；Blogger、Tag、List 均生效。Tag/List 扫描未完整且找不到旧基准时，`0` 跳过推送并自动重建当前第一页基准，正数按上限推送后再重建；发送准备失败、首屏基准无效或基准写入失败时保留旧水位，发送调用失败则跳过当前批次并推进 seen。
 
-全局 `filter_reposts_enabled` 是 Blogger、Tag、List 后台检查的总开关。实际过滤条件为“全局总开关 && 分组子开关”；二者默认均开启，旧分组缺少子开关时按开启处理。全局关闭时任何分组都不能单独强制开启。手动命令不读取分组子开关。
+全局 `filter_reposts_enabled` 是后台检查与手动命令的转发过滤总开关。后台检查的实际过滤条件为“全局总开关 && 分组子开关”；二者默认均开启，旧分组缺少子开关时按开启处理。全局关闭时任何分组都不能单独强制开启。手动 `/推文` 与 `/推图` 命令亦遵循此全局总开关（手动命令不读取分组子开关）。
 
 全局 AI：
 
@@ -74,15 +74,15 @@ Dashboard 实例能力诊断一次检查统一 `instances` 的用户 RSS、用�
 
 | 配置键 | 默认 | 说明 |
 | --- | --- | --- |
-| `send_batch_summary_enabled` | `true` | 非合并普通推送时是否发送概括横幅消息（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后仅逐条发送推文卡片，阻断发送单独的概括消息；QQ 合并转发整包发送时不使用本项。 |
+| `send_batch_summary_enabled` | `true` | 是否发送推送统计与概括摘要（例如“📬 默认分组 · 1 位博主 · 1 条新推文”）。关闭后开启极简纯净模式，全链路（定时、间隔、手动命令）不再发送任何批次横幅、合并统计头节点及推文末尾的 📎 附件统计行，仅保留推文核心内容。 |
 | `manual_send_interval` | `0` | 手动命令逐条发送间隔秒数。 |
 | `target_blocked_users` | `[]` | 隐藏列表配置，每项为完整 UMO 与其用户名列表；同一目标跨多个分组共享，命令和 Dashboard 维护，发送阶段按目标过滤。目标 UMO 需完整格式（如 `aiocqhttp:GroupMessage:123`）。 |
 
-### `send_batch_summary_enabled` 批次概括横幅控制
+### `send_batch_summary_enabled` 推送统计摘要与极简纯净模式
 
-- **解决痛点（Close #74）**：普通逐条推送（非合并转发）时，调度器默认会在推文卡片前先发送一条批次概括横幅（如“📬 默认分组 · 1 位博主 · 1 条新推文”）。部分推送群聊希望降低刷屏干扰，仅接收推文卡片本身。
-- **实现机制**：在普通逐条推送发送流程（`runner_send`）中，当该配置项为 `false` 时，动态将目标批次概括内容置空，从而直接阻断发送单独的概括横幅消息。
-- **合并转发差异**：私人号 OneBot 满足 `merge_tweet_threshold` 触发合并转发时，概括横幅作为整包的头部索引节点保留，不受该开关影响。
+- **解决痛点（Close #74）**：推送时默认会先发送一条推送统计与概括摘要（如“📬 默认分组 · 1 位博主 · 1 条新推文”）。部分推送群聊希望降低刷屏干扰，仅接收推文核心内容本身。
+- **实现机制**：调度端在发送流程（`runner_send`）中当该配置项为 `false` 时，动态将目标批次概括内容置空；渲染端（`TweetMessageRenderer`）同步按开关省略合并统计头节点与推文末尾的 📎 附件统计行。
+- **覆盖范围**：全链路（定时、间隔、手动命令）生效；开启时行为不变，合并转发时概括横幅作为整包的头部索引节点保留。
 
 ### `forward_reject_plain_fallback_enabled` 风控拒收回退控制
 

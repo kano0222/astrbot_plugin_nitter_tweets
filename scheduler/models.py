@@ -8,6 +8,7 @@ try:
         TweetItem,
         format_subscription_count,
         format_subscription_source,
+        redact_instance_urls,
         sanitize_diagnostic,
     )
     from ..shared.group_ids import DEFAULT_GROUP_NAME, GLOBAL_GROUP_ID
@@ -18,6 +19,7 @@ except ImportError:
         TweetItem,
         format_subscription_count,
         format_subscription_source,
+        redact_instance_urls,
         sanitize_diagnostic,
     )
     from shared.group_ids import DEFAULT_GROUP_NAME, GLOBAL_GROUP_ID
@@ -327,9 +329,10 @@ class ScheduledCheckResult:
             if self.media_only_skipped or self.media_only_retrying
             else ""
         )
+        reason_display = "手动检查" if self.reason.startswith("manual") else self.reason
         return (
             "[NitterTweets] 定时检查完成: "
-            f"group={self.group_id}, type={self.group_type}, reason={self.reason}, "
+            f"group={self.group_id}, type={self.group_type}, reason={reason_display}, "
             f"sources={len(self.users)}, targets={len(self.targets)}, "
             f"checked={self.checked_user_count}, initialized={len(self.initialized_users)}, "
             f"new_tweets={self.new_tweet_count}, no_new={len(self.no_new_users)}, "
@@ -364,7 +367,7 @@ class ScheduledCheckResult:
         lines.append(f"  订阅类型: {type_cn} (共 {sources_count} 个源)")
 
         reason_display = (
-            "手动命令 (！推文检查)"
+            "手动检查"
             if self.reason.startswith("manual")
             else f"定时检查 ({self.reason})"
             if self.reason.startswith("interval") or self.reason.startswith("cron")
@@ -502,7 +505,9 @@ class ScheduledCheckResult:
         # Failures detail
         if self.failed_users:
             failed_items = [
-                sanitize_diagnostic(f"{self._failure_label(user)}: {error}")
+                sanitize_diagnostic(
+                    redact_instance_urls(f"{self._failure_label(user)}: {error}")
+                )
                 for user, error in self.failed_users.items()
             ]
             lines.append(
@@ -556,7 +561,9 @@ class ScheduledCheckResult:
             )
         if self.failed_users:
             failed_items = [
-                sanitize_diagnostic(f"{self._failure_label(user)}: {error}")
+                sanitize_diagnostic(
+                    redact_instance_urls(f"{self._failure_label(user)}: {error}")
+                )
                 for user, error in self.failed_users.items()
             ]
             lines.append(
@@ -707,7 +714,7 @@ class ScheduledCheckResult:
 
         if self.baseline_rebuild_failed_users:
             items = [
-                f"{self._subscription_label(user)}: {error}"
+                f"{self._subscription_label(user)}: {redact_instance_urls(error)}"
                 for user, error in self.baseline_rebuild_failed_users.items()
             ]
             lines.append(
@@ -783,7 +790,7 @@ class ScheduledCheckResult:
 
         if self.failed_users:
             items = [
-                f"{self._failure_label(user)}: {error}"
+                f"{self._failure_label(user)}: {redact_instance_urls(error)}"
                 for user, error in self.failed_users.items()
             ]
             lines.append("失败: " + _format_limited_values(items, separator="; "))

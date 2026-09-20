@@ -23,6 +23,7 @@ try:
         clean_text,
         load_instances,
         normalize_external_links,
+        redact_instance_urls,
     )
 except ImportError:
     from config import config_get, parse_config_bool
@@ -33,6 +34,7 @@ except ImportError:
         clean_text,
         load_instances,
         normalize_external_links,
+        redact_instance_urls,
     )
 
 try:
@@ -581,7 +583,7 @@ class NitterClient:
                     if instance not in empty_instances:
                         empty_instances.append(instance)
                     self.host_scores.record_success(instance, soft=True)
-                    error_msg = f"{instance}: {exc} ({attempt_label})"
+                    error_msg = f"#{index + 1}: {exc} ({attempt_label})"
                     if error_msg not in errors:
                         errors.append(error_msg)
                     self._log_instance_fetch_failure_with_round(
@@ -595,7 +597,7 @@ class NitterClient:
                     )
                     continue
                 except Exception as exc:
-                    error_msg = f"{instance}: {exc} ({attempt_label})"
+                    error_msg = f"#{index + 1}: {exc} ({attempt_label})"
                     if error_msg not in errors:
                         errors.append(error_msg)
                     self.host_scores.record_failure(instance)
@@ -688,7 +690,7 @@ class NitterClient:
                         filter_reposts,
                     )
                 except Exception as exc:
-                    error_msg = f"{instance}: {exc} ({attempt_label})"
+                    error_msg = f"#{index + 1}: {exc} ({attempt_label})"
                     if error_msg not in errors:
                         errors.append(error_msg)
                     self.host_scores.record_failure(instance)
@@ -711,7 +713,7 @@ class NitterClient:
                     )
                     return instance, result.tweets, result.plain_text_filtered
                 self.host_scores.record_success(instance, soft=True)
-                error_msg = f"{instance}: empty feed ({attempt_label})"
+                error_msg = f"#{index + 1}: empty feed ({attempt_label})"
                 if error_msg not in errors:
                     errors.append(error_msg)
                 self._log_instance_fetch_failure_with_round(
@@ -751,7 +753,7 @@ class NitterClient:
         if not is_last_in_round:
             logger.warning(
                 "[NitterTweets] RSS 实例失败，尝试下一个实例: "
-                f"instance={instance}, next_instance={instances[index + 1]}, "
+                f"instance=#{index + 1}, next_instance=#{index + 2}, "
                 f"username={username}, round={round_num + 1}/{max_rounds}, error={error}"
             )
             return
@@ -759,14 +761,14 @@ class NitterClient:
         if not is_last_round:
             logger.warning(
                 "[NitterTweets] RSS 本轮最后实例失败，准备下一轮: "
-                f"instance={instance}, username={username}, "
+                f"instance=#{index + 1}, username={username}, "
                 f"round={round_num + 1}/{max_rounds}, error={error}"
             )
             return
 
         logger.warning(
             "[NitterTweets] RSS 实例失败，已无更多实例可尝试: "
-            f"instance={instance}, username={username}, error={error}"
+            f"instance=#{index + 1}, username={username}, error={error}"
         )
 
     def _log_instance_fetch_success(
@@ -781,7 +783,7 @@ class NitterClient:
 
         logger.info(
             "[NitterTweets] RSS 实例成功，已完成实例切换: "
-            f"instance={instance}, username={username}, tweets={len(result.tweets)}"
+            f"instance=#{index + 1}, username={username}, tweets={len(result.tweets)}"
         )
 
     async def fetch_tweets_from_instance(
@@ -802,7 +804,7 @@ class NitterClient:
             filter_reposts=filter_reposts,
         )
         if not result.tweets and not result.saw_items:
-            raise RuntimeError(f"{normalized}: empty feed")
+            raise RuntimeError("empty feed")
         return normalized, result.tweets
 
     def _format_fetch_errors(
@@ -811,10 +813,18 @@ class NitterClient:
         if not errors:
             return "未配置 Nitter 实例"
 
-        shown_errors = errors[-3:]
+        shown_errors = [redact_instance_urls(error) for error in errors[-3:]]
         hidden_count = len(errors) - len(shown_errors)
         total_count = total_count if total_count is not None else len(self.instances)
-        summary = f"已尝试 {len(errors)}/{total_count} 个 Nitter 实例，未获得可用 RSS"
+        if len(errors) > total_count:
+            summary = (
+                f"已尝试 {total_count} 个 Nitter 实例共 {len(errors)} 次请求"
+                "（含重试），未获得可用 RSS"
+            )
+        else:
+            summary = (
+                f"已尝试 {len(errors)}/{total_count} 个 Nitter 实例，未获得可用 RSS"
+            )
         if hidden_count > 0:
             summary += (
                 f"；仅显示最后 {len(shown_errors)} 个错误（已省略前 {hidden_count} 个）"
@@ -869,7 +879,7 @@ class NitterClient:
                     raise
                 logger.warning(
                     "[NitterTweets] RSS 分页抓取在已有部分结果后失败: "
-                    f"instance={instance}, username={username}, fetched={len(tweets)}"
+                    f"username={username}, fetched={len(tweets)}"
                 )
                 break
 
@@ -969,7 +979,7 @@ class NitterClient:
             )
             if page.raw_item_count == 0 and page.plain_text_filtered == 0:
                 if scanned_item_count == 0:
-                    raise EmptyFeedError(f"{instance}: empty feed")
+                    raise EmptyFeedError("empty feed")
                 if boundary_ids and not reached_watermark:
                     raise RuntimeError("后台 RSS 扫描未完成：未找到任何已记录基准 ID")
                 complete = True
@@ -1137,7 +1147,7 @@ class NitterClient:
                 if not self.brief_log_enabled:
                     logger.warning(
                         "[NitterTweets] RSS 抓取失败，准备重试: "
-                        f"instance={instance}, username={username}, "
+                        f"username={username}, "
                         f"attempt={attempt}/{attempts}, delay={delay:g}s, error={exc}"
                     )
                 if delay > 0:
