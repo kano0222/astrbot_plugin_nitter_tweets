@@ -70,10 +70,19 @@ _GROUP_TYPE_LABELS = {
 }
 
 _TRIGGER_LABELS = {
-    "manual_command": "手动命令 (！推文检查)",
+    "manual_command": "手动命令",
     "passive_link": "聊天消息中的推文链接",
     "interval": "定时轮询",
     "cron": "Cron 定时",
+}
+
+_MANUAL_OP_LABELS = {
+    "user_media": "推图",
+    "user_timeline": "推文",
+    "tweet_search": "推文搜索",
+    "tweet_pic_search": "推文搜图",
+    "trends": "推特热搜",
+    "mirror_test": "镜像测试",
 }
 
 _TASK_LABELS = {
@@ -104,6 +113,7 @@ _SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"([\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;}\]]+)"
 )
 _URL_QUERY_RE = re.compile(r"(https?://[^\s/?#]+(?:/[^\s?#]*)?)\?[^\s)]+")
+_BARE_URL_RE = re.compile(r"https?://\S+")
 _WS_RE = re.compile(r"\s+")
 
 
@@ -132,6 +142,17 @@ def sanitize_sensitive_text(text: str) -> str:
     text = _BEARER_RE.sub("Bearer ***", text)
     text = _SENSITIVE_ASSIGNMENT_RE.sub(r"\1\2***", text)
     return text
+
+
+def redact_instance_urls(text: str) -> str:
+    """Replace bare instance URLs with a placeholder.
+
+    Defense-in-depth for aggregated fetch-error text: 自建实例地址不得进入
+    摘要消息或日志，序号化遗漏的残余 URL（含异常文本里嵌入的请求地址）在此兜底。
+    """
+    if not text:
+        return ""
+    return _BARE_URL_RE.sub("实例地址", str(text))
 
 
 def sanitize_diagnostic(value: object) -> str:
@@ -176,6 +197,12 @@ def safe_task_log(level: int, title: str, **fields: object) -> None:
     if trigger:
         trigger_str = str(trigger).strip()
         trigger_label = _TRIGGER_LABELS.get(trigger_str, trigger_str)
+        if trigger_str == "manual_command":
+            op = str(fields.get("operation") or "").strip()
+            if op in _MANUAL_OP_LABELS:
+                trigger_label = f"手动命令 ({_MANUAL_OP_LABELS[op]})"
+            else:
+                trigger_label = "手动命令"
         lines.append(f"  触发原因: {trigger_label}")
 
     # 5. Effective Instance
@@ -183,14 +210,18 @@ def safe_task_log(level: int, title: str, **fields: object) -> None:
     if instance:
         inst_str = str(instance).strip()
         if inst_str:
-            lines.append(f"  生效实例: {sanitize_diagnostic(inst_str)}")
+            lines.append(
+                f"  生效实例: {sanitize_diagnostic(redact_instance_urls(inst_str))}"
+            )
 
     # 6. Failover Trace
     failover_trace = fields.get("failover_trace")
     if failover_trace:
         trace_str = str(failover_trace).strip()
         if trace_str:
-            lines.append(f"  轮换轨迹: {sanitize_diagnostic(trace_str)}")
+            lines.append(
+                f"  轮换轨迹: {sanitize_diagnostic(redact_instance_urls(trace_str))}"
+            )
 
     # 7. Tweet Summary
     tweet_count = fields.get("tweet_count")
@@ -251,7 +282,9 @@ def safe_task_log(level: int, title: str, **fields: object) -> None:
     # 11. Error Details (if any)
     error_detail = fields.get("error_detail")
     if error_detail:
-        lines.append(f"  失败详情: {sanitize_diagnostic(error_detail)}")
+        lines.append(
+            f"  失败详情: {sanitize_diagnostic(redact_instance_urls(str(error_detail)))}"
+        )
 
     # 12. Elapsed Time
     elapsed_ms = fields.get("elapsed_ms")

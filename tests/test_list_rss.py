@@ -208,7 +208,7 @@ def test_fetch_group_list_rss_error_sanitizes_log():
         warning_msg = mock_warn.call_args[0][0]
         assert "pass@" not in warning_msg
         assert "secret123" not in warning_msg
-        assert "***@" in warning_msg
+        assert "实例地址" in warning_msg
 
 
 def test_fetch_group_users_merged_rss_error_sanitizes_log():
@@ -252,4 +252,4 @@ def test_fetch_group_users_merged_rss_error_sanitizes_log():
         warning_msg = mock_warn.call_args[0][0]
         assert "pass@" not in warning_msg
         assert "secret123" not in warning_msg
-        assert "***@" in warning_msg
+        assert "实例地址" in warning_msg

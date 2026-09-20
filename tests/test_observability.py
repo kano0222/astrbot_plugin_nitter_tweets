@@ -116,6 +116,8 @@ def test_manual_task_log_uses_actual_zero_sent_count(monkeypatch):
     mock_logger.log.assert_called_once()
     level, message = mock_logger.log.call_args.args
     assert level == logging.WARNING
+    assert "触发原因: 手动命令 (推文)" in message
+    assert "！" not in message
     assert "推文统计: 新推文 2 条; 实际发送 0 条" in message
     assert "推送结果: 成功推送 0/1 个目标" in message
     assert "执行状态: 发送失败" in message
@@ -218,3 +220,76 @@ def test_scheduler_log_ai_emits_when_enabled_and_not_brief(monkeypatch):
 
     runner._log_ai_process_results("test", [MagicMock(), MagicMock()], None)
     assert mock_logger.info.call_count == 2
+
+
+def test_manual_task_log_dynamic_operation_labels(monkeypatch):
+    mock_logger = MagicMock()
+    monkeypatch.setattr("shared.observability.logger", mock_logger)
+
+    ops_and_expected = [
+        ("user_media", "手动命令 (推图)"),
+        ("user_timeline", "手动命令 (推文)"),
+        ("tweet_search", "手动命令 (推文搜索)"),
+        ("tweet_pic_search", "手动命令 (推文搜图)"),
+        ("trends", "手动命令 (推特热搜)"),
+        ("mirror_test", "手动命令 (镜像测试)"),
+        ("unknown_op", "手动命令"),
+        ("", "手动命令"),
+    ]
+
+    for op, expected in ops_and_expected:
+        mock_logger.reset_mock()
+        safe_task_log(
+            logging.INFO,
+            "测试任务",
+            operation=op,
+            trigger="manual_command",
+        )
+        _lvl, msg = mock_logger.log.call_args[0]
+        assert f"触发原因: {expected}" in msg
+        assert "！" not in msg
+
+
+def test_scheduled_check_result_reason_display_manual():
+    from scheduler.models import ScheduledCheckResult
+
+    result = ScheduledCheckResult(
+        reason="manual:123",
+        group_id="g1",
+        group_name="测试组",
+        group_type="blogger",
+        users=["nasa"],
+    )
+    log = result.format_structured_task_log()
+    assert "触发原因: 手动检查" in log
+    assert "！" not in log
+    assert "推文检查任务完成" in log
+
+    summary = result.format_log_summary()
+    assert "reason=手动检查" in summary
+
+
+def test_safe_task_log_redacts_instance_urls_in_instance_trace_and_error(monkeypatch):
+    """Verify safe_task_log redacts bare instance URLs in instance, failover_trace, and error_detail."""
+    mock_logger = MagicMock()
+    monkeypatch.setattr("shared.observability.logger", mock_logger)
+
+    safe_task_log(
+        logging.WARNING,
+        "任务失败",
+        operation="fetch",
+        instance="https://my-internal.nitter.corp:8443",
+        failover_trace="https://h1.lan[429] ➔ https://h2.lan[500]",
+        error_detail="Timeout connecting to https://secret.backend:8080/api?token=abc",
+    )
+
+    assert mock_logger.log.called
+    _lvl, message = mock_logger.log.call_args[0]
+    assert "https://my-internal.nitter.corp:8443" not in message
+    assert "https://h1.lan" not in message
+    assert "https://h2.lan" not in message
+    assert "https://secret.backend:8080" not in message
+    assert "token=abc" not in message
+    assert "生效实例: 实例地址" in message
+    assert "轮换轨迹: 实例地址 ➔ 实例地址" in message
+    assert "失败详情: Timeout connecting to 实例地址" in message
