@@ -1597,6 +1597,7 @@ function updateHeader() {
 
 function switchView(v) {
   if (!v || state.view === v) return;
+  hideAlert();
   state.view = v;
   els.tabs.forEach(t => t.classList.toggle("active", t.dataset.view === v));
   els.views.forEach(s => s.classList.toggle("active", s.id === `${v}View`));
