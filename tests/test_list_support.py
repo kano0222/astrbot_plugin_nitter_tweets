@@ -639,6 +639,10 @@ def test_dashboard_source_contains_busy_feedback_and_local_entity_updates():
     assert "border-color: var(--blue-border);" in style
     assert ".groups-layout > * { min-width: 0; }" in style
     assert 'id="actionStatus"' in index
+    assert 'id="alertCloseBtn"' in index
+    assert 'id="actionStatusCloseBtn"' in index
+    assert "state.actionStatusDismissed = true;" in source
+    assert ".feedback-close" in style
     assert 'aria-live="polite"' in index
 
 

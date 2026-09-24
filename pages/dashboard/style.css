@@ -434,6 +434,29 @@ body.ui-busy .view textarea { cursor: wait; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 .action-status[hidden] { display: none; }
 
+.feedback-message {
+  min-width: 0;
+  flex: 1;
+}
+
+.feedback-close {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  margin: -4px -6px -4px 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: currentColor;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.feedback-close:hover { background: rgba(127, 127, 127, 0.14); }
+.feedback-close:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+
 #alert,
 #actionStatus {
   position: fixed;
@@ -980,12 +1003,16 @@ select { cursor: pointer; }
 }
 
 .alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 10px 14px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
   background-color: var(--surface);
 }
+.alert[hidden] { display: none; }
 .alert.success { background-image: linear-gradient(var(--green-soft), var(--green-soft)); color: var(--green); }
 .alert.error { background-image: linear-gradient(var(--red-soft), var(--red-soft)); color: var(--red); }
 .alert.warn { background-image: linear-gradient(var(--yellow-soft), var(--yellow-soft)); color: #b07800; }
