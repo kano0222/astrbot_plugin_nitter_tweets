@@ -145,6 +145,8 @@ async function apiPost(endpoint, body) {
    -------------------------------------------------------------------------- */
 function showAlert(msg, type = "success") {
   if (!els.alert) return;
+  state.actionStatusDismissed = true;
+  if (els.actionStatus) els.actionStatus.hidden = true;
   els.alert.className = `alert ${type}`;
   if (els.alertMessage) els.alertMessage.textContent = msg;
   els.alert.hidden = false;
